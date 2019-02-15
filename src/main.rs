@@ -10,9 +10,9 @@ const USAGE: &'static str = "
 Raspberry Pi Wave Field Synthesis System
 
 Usage:
-  wifs master
-  wifs slave
-  wifs (-h | --help)
+  piwfs master
+  piwfs slave
+  piwfs (-h | --help)
 
 Options:
   -h --help     Show this screen.
