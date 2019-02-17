@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use rppal::gpio::Gpio;
 
-pub fn main() {
+use super::Args;
+
+pub fn main(args : Args) {
     let timer = timer::Timer::new();
     let gpio = Gpio::new().unwrap();
     let pin = Arc::new(Mutex::new(gpio.get(4).unwrap().into_output()));
