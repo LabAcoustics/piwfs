@@ -16,7 +16,7 @@ Usage:
 
 Options:
   -h --help     Show this screen.
-  --device=<dev>   Select ALSA device [default: default]
+  --device=<dev>   Select ALSA device [default: hw:0]
 ";
 
 #[derive(Debug, Deserialize)]
