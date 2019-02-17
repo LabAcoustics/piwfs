@@ -1,4 +1,9 @@
 [[package]]
+name = "adi_clock"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "aho-corasick"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -101,6 +106,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "piwfs"
 version = "0.1.0"
 dependencies = [
+ "adi_clock 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "alsa 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "docopt 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -262,6 +268,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [metadata]
+"checksum adi_clock 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d4bc9581172a740316e95f1dcfbbebcd43394a1063e3fa348dc41b6f76d991ce"
 "checksum aho-corasick 0.6.9 (registry+https://github.com/rust-lang/crates.io-index)" = "1e9a933f4e58658d7b12defcf96dc5c720f20832deebe3e0a19efd3b6aaeeb9e"
 "checksum alsa 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "8fd5a75e70d45a943d2a0a818277e71d6ff777e97358529d6b460d3d4c4d0745"
 "checksum alsa-sys 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "b0edcbbf9ef68f15ae1b620f722180b82a98b6f0628d30baa6b8d2a5abc87d58"

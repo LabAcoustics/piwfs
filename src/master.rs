@@ -1,22 +1,29 @@
 use std::thread;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, TryRecvError};
 
 use rppal::gpio::Gpio;
 
 use super::Args;
 
 pub fn main(args : Args) {
-    let timer = timer::Timer::new();
-    let gpio = Gpio::new().unwrap();
-    let pin = Arc::new(Mutex::new(gpio.get(4).unwrap().into_output()));
+    let (tx, rx) = mpsc::channel();
 
-    let guard = {
-        let pin = pin.clone();
-        timer.schedule_repeating(chrono::Duration::milliseconds(5), move || {
-            pin.lock().unwrap().toggle();
-        })
-    };
+    let child = thread::spawn(move || {
+        let gpio = Gpio::new().unwrap();
+        let mut pin = gpio.get(4).unwrap().into_output();
+        let mut timer = adi_clock::Timer::new(0.05);
+
+        loop {
+            match rx.try_recv() {
+                Ok(_) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {}
+            }
+            timer.wait();
+            pin.toggle();
+        }
+    });
 
     thread::sleep(std::time::Duration::new(1, 0));
-    drop(guard);
+    tx.send(()).unwrap();
+    child.join().unwrap();;
 }
