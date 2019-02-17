@@ -15,7 +15,7 @@ Usage:
   piwfs (-h | --help)
 
 Options:
-  -h --help     Show this screen.
+  -h --help        Show this screen.
   --device=<dev>   Select ALSA device [default: hw:0]
 ";
 
