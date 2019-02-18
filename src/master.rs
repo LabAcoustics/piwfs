@@ -18,7 +18,7 @@ pub fn main(args : Args) {
                 Ok(_) | Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => {}
             }
-            println!("{} behind", timer.wait());
+            timer.wait();
             pin.toggle();
         }
     });

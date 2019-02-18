@@ -1,9 +1,10 @@
-use std::sync::Mutex;
+use std::sync::{Arc,Mutex};
 
 use rppal::gpio::{Gpio, Trigger};
 use alsa::{Direction, ValueOr};
 use alsa::pcm::{PCM, HwParams, Format, Access, State};
 use alsa::direct::pcm::SyncPtrStatus;
+use num::pow;
 
 use super::Args;
 
@@ -21,14 +22,16 @@ pub fn main(args : Args) {
     let mut pin = gpio.get(4).unwrap().into_input_pulldown();
 
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
+    let int_times = Arc::new(Mutex::new(std::vec::Vec::new()));
 
     let guard = {
+        let int_times = int_times.clone();
         let pcm_fd = Mutex::new(pcm_to_fd(&pcm).unwrap());
         pin.set_async_interrupt(Trigger::RisingEdge, move |_level| {
             let status = unsafe {
                 SyncPtrStatus::sync_ptr(*pcm_fd.lock().unwrap(), true, None, None).unwrap()
             };
-            println!("Time: {}:{}", status.htstamp().tv_sec, status.htstamp().tv_nsec);
+            int_times.lock().unwrap().push(status.htstamp().tv_sec as i64 * pow::pow(10i64,9) + status.htstamp().tv_nsec as i64);
         }).unwrap();
     };
 
@@ -64,4 +67,15 @@ pub fn main(args : Args) {
     // Wait for the stream to finish playback.
     pcm.drain().unwrap();
     drop(guard);
+
+    let int_times = int_times.lock().unwrap();
+    if int_times.len() > 0 {
+        let diffs = int_times[1..].iter()
+            .zip(&int_times[..int_times.len()-1])
+            .map(|(x, y)| x-y);
+
+        println!("Received {} interrupts. The mean time differences are {:?}", int_times.len(), diffs.collect::<Vec<_>>());
+    } else {
+        println!("Received no interrupts.");
+    }
 }
