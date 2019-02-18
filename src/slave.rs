@@ -1,4 +1,6 @@
 use std::sync::{Arc,Mutex};
+use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
 
 use rppal::gpio::{Gpio, Trigger};
 use alsa::{Direction, ValueOr};
@@ -19,22 +21,37 @@ fn pcm_to_fd(p: &PCM) -> alsa::Result<std::os::unix::io::RawFd> {
 
 pub fn main(args : Args) {
     let gpio = Gpio::new().unwrap();
-    let mut pin = gpio.get(4).unwrap().into_input_pulldown();
+    let mut pin = gpio.get(4).unwrap().into_input_pullup();
 
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
     let int_times = Arc::new(Mutex::new(std::vec::Vec::new()));
 
-    let guard = {
-        let int_times = int_times.clone();
-        let pcm_fd = Mutex::new(pcm_to_fd(&pcm).unwrap());
-        pin.set_async_interrupt(Trigger::RisingEdge, move |_level| {
-            let status = unsafe {
-                SyncPtrStatus::sync_ptr(*pcm_fd.lock().unwrap(), true, None, None).unwrap()
-            };
-            int_times.lock().unwrap().push(status.htstamp().tv_sec as i64 * pow::pow(10i64,9) + status.htstamp().tv_nsec as i64);
-        }).unwrap();
-    };
+    let (tx, rx) = mpsc::channel();
 
+    let child = {
+        let int_times = int_times.clone();
+        let pcm_fd = pcm_to_fd(&pcm).unwrap();
+        pin.set_interrupt(Trigger::RisingEdge).unwrap();
+        thread::spawn(move || {
+            let mut int_times = int_times.lock().unwrap();
+            loop {
+                match pin.poll_interrupt(true, Some(std::time::Duration::from_secs(1))) {
+                    Ok(None) => {}
+                    Ok(_) => {
+                        let status = unsafe {
+                            SyncPtrStatus::sync_ptr(pcm_fd, true, None, None).unwrap()
+                        };
+                        int_times.push(status.htstamp().tv_sec as i64 * pow::pow(10i64,9) + status.htstamp().tv_nsec as i64);
+                    }
+                    Err(_) => panic!("Error polling interrupt!")
+                }
+                match rx.try_recv() {
+                    Ok(_) | Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => {}
+                }
+            }
+        });
+    };
     // Set hardware parameters: 44100 Hz / Mono / 16 bit
     let hwp = HwParams::any(&pcm).unwrap();
     hwp.set_channels(2).unwrap();
@@ -66,8 +83,8 @@ pub fn main(args : Args) {
     if pcm.state() != State::Running { pcm.start().unwrap() };
     // Wait for the stream to finish playback.
     pcm.drain().unwrap();
-    drop(guard);
 
+    tx.send(()).unwrap();
     let int_times = int_times.lock().unwrap();
     if int_times.len() > 0 {
         let diffs = int_times[1..].iter()
