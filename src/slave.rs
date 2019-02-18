@@ -28,7 +28,7 @@ pub fn main(args : Args) {
 
     let (tx, rx) = mpsc::channel();
 
-    let child = {
+    let _child = {
         let int_times = int_times.clone();
         let pcm_fd = pcm_to_fd(&pcm).unwrap();
         pin.set_interrupt(Trigger::RisingEdge).unwrap();
@@ -87,11 +87,13 @@ pub fn main(args : Args) {
     tx.send(()).unwrap();
     let int_times = int_times.lock().unwrap();
     if int_times.len() > 0 {
-        let diffs = int_times[1..].iter()
+        let int_times_sum : i64 = int_times[1..].iter()
             .zip(&int_times[..int_times.len()-1])
-            .map(|(x, y)| x-y);
+            .map(|(x, y)| x-y)
+            .sum();
+        let int_times_mean = int_times_sum/(int_times.len() as i64 - 1i64);
 
-        println!("Received {} interrupts. The mean time differences are {:?}", int_times.len(), diffs.collect::<Vec<_>>());
+        println!("Received {} interrupts. The mean time difference is {}", int_times.len(), int_times_mean);
     } else {
         println!("Received no interrupts.");
     }
