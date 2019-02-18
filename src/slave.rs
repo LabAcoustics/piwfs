@@ -19,7 +19,7 @@ fn pcm_to_fd(p: &PCM) -> alsa::Result<std::os::unix::io::RawFd> {
 
 pub fn main(args : Args) {
     let gpio = Gpio::new().unwrap();
-    let mut pin = gpio.get(4).unwrap().into_input_pulldown();
+    let mut pin = gpio.get(4).unwrap().into_input_pullup();
 
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
     let int_times = Arc::new(Mutex::new(std::vec::Vec::new()));
