@@ -11,7 +11,7 @@ pub fn main(args : Args) {
     let child = thread::spawn(move || {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio.get(4).unwrap().into_output();
-        let mut timer = adi_clock::Timer::new(0.05);
+        let mut timer = adi_clock::Timer::new(0.005);
 
         loop {
             match rx.try_recv() {
