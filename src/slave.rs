@@ -38,10 +38,12 @@ pub fn main(args : Args) {
                 match pin.poll_interrupt(true, Some(std::time::Duration::from_secs(1))) {
                     Ok(None) => {}
                     Ok(_) => {
-                        let status = unsafe {
-                            SyncPtrStatus::sync_ptr(pcm_fd, true, None, None).unwrap()
-                        };
-                        int_times.push(status.htstamp().tv_sec as i64 * pow::pow(10i64,9) + status.htstamp().tv_nsec as i64);
+                        match unsafe { SyncPtrStatus::sync_ptr(pcm_fd, true, None, None) } {
+                            Ok(status) => {
+                                int_times.push(status.htstamp().tv_sec as i64 * pow::pow(10i64,9) + status.htstamp().tv_nsec as i64);
+                            }
+                            Err(e) => println!("Error syncing pointer: {:?}", e),
+                        }
                     }
                     Err(_) => panic!("Error polling interrupt!")
                 }
