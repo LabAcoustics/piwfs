@@ -25,10 +25,13 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
                 int_time: u64, rx: &Receiver<()>, sma_num: u32)
 {
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
+    for _ in 0..sma_num {
+        sma.next(0f64);
+    }
     let mut prev_time: u64 = 0;
     pin.set_interrupt(Trigger::RisingEdge).unwrap();
     loop {
-        match pin.poll_interrupt(true, Some(std::time::Duration::from_nanos(15*int_time/10))) {
+        match pin.poll_interrupt(true, Some(std::time::Duration::from_nanos(2*int_time))) {
             Ok(None) => {
                 prev_time = 0;
             }
@@ -68,14 +71,14 @@ pub fn main(args: Args) {
     let num_channels : u32 = 2;
     let buf_size : usize = 1024;
     let chan_size : usize = buf_size/num_channels as usize;
-    let int_time: u64 = 5 * pow(10, 6);
+    let int_time: u64 = 2 * 5 * pow(10, 6);
 
     let sma_val = Arc::new(Mutex::new(0f64));
     {
         let pcm_fd = pcm_to_fd(&pcm).unwrap();
         let sma_val = sma_val.clone();
         thread::spawn(move || {
-            synch_status(&mut pin, &pcm_fd, &sma_val, int_time, &rx, 100)
+            synch_status(&mut pin, &pcm_fd, &sma_val, int_time, &rx, 1000)
         });
     }
 
