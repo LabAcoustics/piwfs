@@ -26,6 +26,7 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
 {
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
     let mut prev_time: u64 = 0;
+    pin.set_interrupt(Trigger::RisingEdge).unwrap();
     loop {
         match pin.poll_interrupt(true, Some(std::time::Duration::from_nanos(15*int_time/10))) {
             Ok(None) => {
@@ -62,7 +63,6 @@ pub fn main(args: Args) {
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
 
     let (tx, rx) = mpsc::channel();
-    pin.set_interrupt(Trigger::RisingEdge).unwrap();
 
     let fs = 44100;
     let num_channels : u32 = 2;
