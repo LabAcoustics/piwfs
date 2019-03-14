@@ -107,7 +107,7 @@ pub fn main(args: Args) {
             break;
         }
     }
-        io.writei(&buf[..]).unwrap();
+        assert_eq!(io.writei(&buf[..]).unwrap(), buf.len())
 
         println!("Deviation: {}", *sma_val.lock().unwrap());
     }
