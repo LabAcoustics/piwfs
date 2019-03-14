@@ -109,7 +109,7 @@ pub fn main(args: Args) {
             break;
         }
     }
-        assert_eq!(io.writei(&buf[..]).unwrap(), sam_num/num_channels as usize);
+        assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
 
         println!("Deviation: {}", *sma_val.lock().unwrap());
     }
