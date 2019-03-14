@@ -38,7 +38,7 @@ pub fn main(_args : Args) {
         poll.register(&stream, Token(0), Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
         loop {
-            break;
+            if true { break }
             poll.poll(&mut events, None).unwrap();
 
             for event in &events {

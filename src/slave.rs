@@ -9,6 +9,7 @@ use alsa::direct::pcm::SyncPtrStatus;
 use num::pow;
 use ta::indicators::SimpleMovingAverage;
 use ta::Next;
+use hound;
 
 use super::Args;
 
@@ -69,8 +70,6 @@ pub fn main(args: Args) {
 
     let fs = 44100;
     let num_channels : u32 = 2;
-    let buf_size : usize = 1024;
-    let chan_size : usize = buf_size/num_channels as usize;
     let int_time: u64 = 2 * 5 * pow(10, 6);
 
     let sma_val = Arc::new(Mutex::new(0f64));
@@ -82,7 +81,6 @@ pub fn main(args: Args) {
         });
     }
 
-
     let hwp = HwParams::any(&pcm).unwrap();
     hwp.set_channels(num_channels).unwrap();
     hwp.set_rate(fs, ValueOr::Nearest).unwrap();
@@ -93,24 +91,29 @@ pub fn main(args: Args) {
 
     let hwp = pcm.hw_params_current().unwrap();
     let swp = pcm.sw_params_current().unwrap();
-    swp.set_start_threshold(hwp.get_buffer_size().unwrap() - hwp.get_period_size().unwrap()).unwrap();
+    let period_size = hwp.get_period_size().unwrap();
+    let buffer_size = hwp.get_buffer_size().unwrap();
+    swp.set_start_threshold(period_size - buffer_size).unwrap();
     swp.set_tstamp_mode(true).unwrap();
     pcm.sw_params(&swp).unwrap();
 
-    let mut buf = vec![0i16; buf_size];
-    for (i, a) in buf.iter_mut().enumerate() {
-        *a = ((i as f32 * 2.0 * std::f32::consts::PI / 128.0).sin() * 8192.0) as i16
-    }
+    let mut reader = hound::WavReader::open("test.wav").unwrap();
 
-    // Play it back for 10 seconds.
-    for _ in 0..10*fs/chan_size as u32 {
-        assert_eq!(io.writei(&buf[..]).unwrap(), chan_size);
+    while reader.len() > 0 {
+    let mut buf: Vec<i16> = Vec::with_capacity(period_size as usize);
+    for sample in reader.samples::<i16>() {
+        buf.push(sample.unwrap());
+        if buf.len() >= period_size as usize {
+            break;
+        }
+    }
+        io.writei(&buf[..]).unwrap();
+
         println!("Deviation: {}", *sma_val.lock().unwrap());
     }
 
-    // In case the buffer was larger than 2 seconds, start the stream manually.
     if pcm.state() != State::Running { pcm.start().unwrap() };
-    // Wait for the stream to finish playback.
+
     pcm.drain().unwrap();
     tx.send(()).unwrap();
 }
