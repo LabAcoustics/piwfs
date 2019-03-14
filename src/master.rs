@@ -38,13 +38,13 @@ pub fn main(_args : Args) {
         poll.register(&stream, Token(0), Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
         loop {
+            break;
             poll.poll(&mut events, None).unwrap();
 
             for event in &events {
                 if event.token() == Token(0) && event.readiness().is_writable() {
 
                     
-                    break;
                 }
             }
         }
