@@ -100,7 +100,7 @@ pub fn main(args: Args) {
     let mut reader = hound::WavReader::open("test.wav").unwrap();
 
     while reader.len() > 0 {
-    let mut buf: Vec<i16> = Vec::with_capacity(period_size as usize);
+    let mut buf: Vec<i16> = Vec::with_capacity(period_size as usize/num_channels as usize);
     for sample in reader.samples::<i16>() {
         buf.push(sample.unwrap());
         if buf.len() >= period_size as usize {
