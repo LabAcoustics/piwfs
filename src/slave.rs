@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, TryRecvError, Receiver};
 use std::thread;
 
@@ -20,9 +21,10 @@ fn pcm_to_fd(p: &PCM) -> alsa::Result<std::os::unix::io::RawFd> {
     Ok(fds[0].fd)
 }
 
-fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma: &mut SimpleMovingAverage,
-                int_time: u64, rx: &Receiver<()>)
+fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: &Arc<Mutex<f64>>,
+                int_time: u64, rx: &Receiver<()>, sma_num: u32)
 {
+    let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
     let mut prev_time: u64 = 0;
     loop {
         match pin.poll_interrupt(true, Some(std::time::Duration::from_nanos(15*int_time/10))) {
@@ -34,7 +36,10 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma: &mut
                     Ok(status) => {
                         let cur_time = status.htstamp().tv_sec as u64 * pow::pow(10u64,9) + status.htstamp().tv_nsec as u64;
                         if prev_time != 0 {
-                            sma.next(int_time as f64 - (cur_time as f64 - prev_time as f64));
+                            let next_val = sma.next(int_time as f64 - (cur_time as f64 - prev_time as f64));
+                            if let Ok(mut val) = sma_val.try_lock() {
+                                *val = next_val;
+                            }
                         }
                         prev_time = cur_time;
                     }
@@ -55,7 +60,6 @@ pub fn main(args: Args) {
     let mut pin: InputPin = gpio.get(4).unwrap().into_input_pullup();
 
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
-    let mut sma: SimpleMovingAverage = SimpleMovingAverage::new(100).unwrap();
 
     let (tx, rx) = mpsc::channel();
     pin.set_interrupt(Trigger::RisingEdge).unwrap();
@@ -66,10 +70,14 @@ pub fn main(args: Args) {
     let chan_size : usize = buf_size/num_channels as usize;
     let int_time: u64 = 5 * pow(10, 6);
 
-    let pcm_fd = pcm_to_fd(&pcm).unwrap();
-    thread::spawn(move || {
-        synch_status(&mut pin, &pcm_fd, &mut sma, int_time, &rx)
-    });
+    let sma_val = Arc::new(Mutex::new(0f64));
+    {
+        let pcm_fd = pcm_to_fd(&pcm).unwrap();
+        let sma_val = sma_val.clone();
+        thread::spawn(move || {
+            synch_status(&mut pin, &pcm_fd, &sma_val, int_time, &rx, 100)
+        });
+    }
 
 
     let hwp = HwParams::any(&pcm).unwrap();
@@ -94,12 +102,12 @@ pub fn main(args: Args) {
     // Play it back for 10 seconds.
     for _ in 0..10*fs/chan_size as u32 {
         assert_eq!(io.writei(&buf[..]).unwrap(), chan_size);
+        println!("Deviation: {}", *sma_val.lock().unwrap());
     }
 
     // In case the buffer was larger than 2 seconds, start the stream manually.
     if pcm.state() != State::Running { pcm.start().unwrap() };
     // Wait for the stream to finish playback.
     pcm.drain().unwrap();
-
     tx.send(()).unwrap();
 }
