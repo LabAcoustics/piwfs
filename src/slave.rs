@@ -99,17 +99,17 @@ pub fn main(args: Args) {
 
     let mut reader = hound::WavReader::open("test.wav").unwrap();
 
-    let bufsize = period_size as usize/num_channels as usize;
+    let sam_num = period_size as usize * num_channels as usize;
 
     while reader.len() > 0 {
-    let mut buf: Vec<i16> = Vec::with_capacity(bufsize);
+    let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
     for sample in reader.samples::<i16>() {
         buf.push(sample.unwrap());
-        if buf.len() >= bufsize {
+        if buf.len() >= sam_num {
             break;
         }
     }
-        assert_eq!(io.writei(&buf[..]).unwrap(), buf.len());
+        assert_eq!(io.writei(&buf[..]).unwrap(), sam_num/num_channels as usize);
 
         println!("Deviation: {}", *sma_val.lock().unwrap());
     }
