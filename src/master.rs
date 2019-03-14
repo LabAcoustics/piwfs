@@ -8,7 +8,7 @@ use rppal::gpio::Gpio;
 
 use super::Args;
 
-pub fn main(args : Args) {
+pub fn main(_args : Args) {
     let (tx, rx) = mpsc::channel();
 
     let child = thread::spawn(move || {
