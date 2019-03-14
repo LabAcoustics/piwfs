@@ -13,7 +13,7 @@ pub fn main(_args : Args) {
 
     let child = thread::spawn(move || {
         let gpio = Gpio::new().unwrap();
-        let mut pin = gpio.get(5).unwrap().into_output();
+        let mut pin = gpio.get(4).unwrap().into_output();
         let mut timer = adi_clock::Timer::new(0.005);
 	pin.set_reset_on_drop(false);
 
@@ -51,7 +51,7 @@ pub fn main(_args : Args) {
     });
 
 
-    thread::sleep(std::time::Duration::new(1, 0));
+    thread::sleep(std::time::Duration::new(5, 0));
     tx.send(()).unwrap();
     net_th.join().unwrap();
     child.join().unwrap();
