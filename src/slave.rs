@@ -101,16 +101,19 @@ pub fn main(args: Args) {
 
     let sam_num = period_size as usize * num_channels as usize;
 
-    while reader.len() > 0 {
-    let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
-    for sample in reader.samples::<i16>() {
-        buf.push(sample.unwrap());
-        if buf.len() >= sam_num {
-            break;
+    loop {
+        let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
+        let samples = reader.samples::<i16>();
+        let samples_len = samples.len();
+        for sample in samples {
+            buf.push(sample.unwrap());
+            if buf.len() >= sam_num {
+                break;
+            }
         }
-    }
         assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
 
+        if samples_len == 0 { break; }
         println!("Deviation: {}", *sma_val.lock().unwrap());
     }
 
