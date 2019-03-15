@@ -84,14 +84,14 @@ pub fn main(args: Args) {
 
     let sma_val = Arc::new(Mutex::new(0f64));
     let barrier = Arc::new(Barrier::new(2));
-    {
+    let sync_thr = {
         let pcm_fd = pcm_to_fd(&pcm).unwrap();
         let sma_val = sma_val.clone();
         let barrier = barrier.clone();
         thread::spawn(move || {
             synch_status(&mut pin, &pcm_fd, &sma_val, int_time, &rx, 1000, &barrier)
-        });
-    }
+        })
+    };
 
     let hwp = HwParams::any(&pcm).unwrap();
     hwp.set_channels(num_channels).unwrap();
@@ -139,4 +139,5 @@ pub fn main(args: Args) {
 
     pcm.drain().unwrap();
     tx.send(()).unwrap();
+    sync_thr.join().unwrap();
 }
