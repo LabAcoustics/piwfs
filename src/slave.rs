@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Barrier};
 use std::sync::mpsc::{self, TryRecvError, Receiver};
 use std::thread;
 
@@ -23,9 +23,10 @@ fn pcm_to_fd(p: &PCM) -> alsa::Result<std::os::unix::io::RawFd> {
 }
 
 fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: &Arc<Mutex<f64>>,
-                int_time: u64, rx: &Receiver<()>, sma_num: u32)
+                int_time: u64, rx: &Receiver<()>, sma_num: u32, barrier: &Arc<Barrier>)
 {
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
+    let mut first_time = true;
     for _ in 0..sma_num {
         sma.next(0f64);
     }
@@ -39,6 +40,7 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
             Ok(_) => {
                 match unsafe { SyncPtrStatus::sync_ptr(*pcm_fd, true, None, None) } {
                     Ok(status) => {
+                        if first_time { first_time = false; barrier.wait(); }
                         let cur_time = status.htstamp().tv_sec as u64 * pow::pow(10u64,9) + status.htstamp().tv_nsec as u64;
                         if prev_time != 0 {
                             let next_val = sma.next(int_time as f64 - (cur_time as f64 - prev_time as f64));
@@ -62,7 +64,7 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
 
 pub fn main(args: Args) {
     let gpio: rppal::gpio::Gpio = Gpio::new().unwrap();
-    let mut pin: InputPin = gpio.get(4).unwrap().into_input_pullup();
+    let mut pin: InputPin = gpio.get(16).unwrap().into_input_pullup();
 
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
 
@@ -76,11 +78,13 @@ pub fn main(args: Args) {
     let int_time: u64 = 2 * 5 * pow(10, 6);
 
     let sma_val = Arc::new(Mutex::new(0f64));
+    let barrier = Arc::new(Barrier::new(2));
     {
         let pcm_fd = pcm_to_fd(&pcm).unwrap();
         let sma_val = sma_val.clone();
+        let barrier = barrier.clone();
         thread::spawn(move || {
-            synch_status(&mut pin, &pcm_fd, &sma_val, int_time, &rx, 1000)
+            synch_status(&mut pin, &pcm_fd, &sma_val, int_time, &rx, 1000, &barrier)
         });
     }
 
@@ -101,7 +105,7 @@ pub fn main(args: Args) {
     pcm.sw_params(&swp).unwrap();
 
     let sam_num = period_size as usize * num_channels as usize;
-
+    let mut first_time = true;
     loop {
         let samples = reader.samples::<i16>();
 
@@ -114,12 +118,18 @@ pub fn main(args: Args) {
                 break;
             }
         }
-        assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
 
-        println!("Deviation: {}", *sma_val.lock().unwrap());
+        if first_time {
+            first_time = false;
+            barrier.wait();
+            assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
+            if pcm.state() != State::Running { pcm.start().unwrap() };
+        } else {
+            assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
+            println!("Deviation: {}", *sma_val.lock().unwrap());
+        }
     }
 
-    if pcm.state() != State::Running { pcm.start().unwrap() };
 
     pcm.drain().unwrap();
     tx.send(()).unwrap();
