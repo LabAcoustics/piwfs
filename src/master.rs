@@ -46,7 +46,7 @@ pub fn main(_args : Args) {
                 if prev_time != 0f32 {
                     let dev = pow(10.0, 9)*(int_time - (cur_time - prev_time));
                     deviation.push(dev as i32);
-                    print!("Deviation: {} ns\r", sma.next(dev as f64) as i32);
+                    print!("Deviation: {} ns \r", sma.next(dev as f64) as i32);
                     std::io::stdout().flush().unwrap();
                 }
                 prev_time = cur_time;
