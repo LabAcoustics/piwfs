@@ -31,7 +31,7 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
     for _ in 0..sma_num {
         sma.next(0f64);
     }
-    let mut deviation = Vec::with_capacity((300f64/int_time as f64) as usize);
+    let mut deviation: Vec<i32> = Vec::with_capacity((300f64/int_time as f64) as usize);
     let mut prev_time: u64 = 0;
     pin.set_interrupt(Trigger::RisingEdge).unwrap();
     loop {
@@ -45,7 +45,7 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
                         if first_time { first_time = false; barrier.wait(); }
                         let cur_time = status.htstamp().tv_sec as u64 * pow::pow(10u64,9) + status.htstamp().tv_nsec as u64;
                         if prev_time != 0 {
-                            let dev = int_time - (cur_time - prev_time) as u32;
+                            let dev = int_time as i32 - (cur_time - prev_time) as i32;
                             let next_val = sma.next(dev as f64);
                             deviation.push(dev);
                             if let Ok(mut val) = sma_val.try_lock() {

@@ -32,7 +32,7 @@ pub fn main(_args : Args) {
 
 	pin.set_reset_on_drop(false);
 
-        let mut deviation: Vec<u32> = Vec::with_capacity((wait_time as f32/int_time) as usize);
+        let mut deviation: Vec<i32> = Vec::with_capacity((wait_time as f32/int_time) as usize);
 
         loop {
             match rx.try_recv() {
@@ -43,8 +43,8 @@ pub fn main(_args : Args) {
             pin.toggle();
             if prev_time != 0f32 {
                 let dev = pow(10.0, 9)*2.0*(int_time - (cur_time - prev_time));
-                deviation.push(dev as u32);
-                print!("Deviation: {} ns\r", sma.next(dev as f64) as u32);
+                deviation.push(dev as i32);
+                print!("Deviation: {} ns\r", sma.next(dev as f64) as i32);
                 std::io::stdout().flush().unwrap();
             }
             prev_time = cur_time;
