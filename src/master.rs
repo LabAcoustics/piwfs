@@ -9,18 +9,21 @@ use ta::Next;
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::TcpStream;
 use num::pow;
+use npy;
 
 use super::Args;
 
 pub fn main(_args : Args) {
     let (tx, rx) = mpsc::channel();
 
+    let wait_time: u64 = 300;
+    let sma_num = 1000;
+    let int_time: f32 = 0.005;
+
     let child = thread::spawn(move || {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio.get(16).unwrap().into_output();
-        let int_time = 0.005;
         let mut timer = adi_clock::Timer::new(int_time);
-        let sma_num = 1000;
         let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
         let mut prev_time = 0f32;
         for _ in 0..sma_num {
@@ -28,6 +31,8 @@ pub fn main(_args : Args) {
         }
 
 	pin.set_reset_on_drop(false);
+
+        let mut deviation: Vec<u32> = Vec::with_capacity((wait_time as f32/int_time) as usize);
 
         loop {
             match rx.try_recv() {
@@ -37,12 +42,15 @@ pub fn main(_args : Args) {
             let cur_time = timer.wait();
             pin.toggle();
             if prev_time != 0f32 {
-                print!("Deviation: {} ns\r", (pow(10f64, 9) * sma.next((int_time - (cur_time - prev_time)) as f64)) as u32 * 2u32);
+                let dev = pow(10.0, 9)*2.0*(int_time - (cur_time - prev_time));
+                deviation.push(dev as u32);
+                print!("Deviation: {} ns\r", sma.next(dev as f64) as u32);
                 std::io::stdout().flush().unwrap();
             }
             prev_time = cur_time;
         }
 	pin.set_high();
+        npy::to_file("deviation.npy", deviation).unwrap();
     });
 
     let net_th = thread::spawn(move || {
@@ -68,7 +76,7 @@ pub fn main(_args : Args) {
     });
 
 
-    thread::sleep(std::time::Duration::new(300, 0));
+    thread::sleep(std::time::Duration::new(wait_time, 0));
     tx.send(()).unwrap();
     net_th.join().unwrap();
     child.join().unwrap();

@@ -24,17 +24,18 @@ fn pcm_to_fd(p: &PCM) -> alsa::Result<std::os::unix::io::RawFd> {
 }
 
 fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: &Arc<Mutex<f64>>,
-                int_time: u64, rx: &Receiver<()>, sma_num: u32, barrier: &Arc<Barrier>)
+                int_time: u32, rx: &Receiver<()>, sma_num: u32, barrier: &Arc<Barrier>)
 {
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
     let mut first_time = true;
     for _ in 0..sma_num {
         sma.next(0f64);
     }
+    let mut deviation = Vec::with_capacity((300f64/int_time as f64) as usize);
     let mut prev_time: u64 = 0;
     pin.set_interrupt(Trigger::RisingEdge).unwrap();
     loop {
-        match pin.poll_interrupt(true, Some(std::time::Duration::from_nanos(2*int_time))) {
+        match pin.poll_interrupt(true, Some(std::time::Duration::from_nanos(2*int_time as u64))) {
             Ok(None) => {
                 prev_time = 0;
             }
@@ -44,7 +45,9 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
                         if first_time { first_time = false; barrier.wait(); }
                         let cur_time = status.htstamp().tv_sec as u64 * pow::pow(10u64,9) + status.htstamp().tv_nsec as u64;
                         if prev_time != 0 {
-                            let next_val = sma.next(int_time as f64 - (cur_time as f64 - prev_time as f64));
+                            let dev = int_time - (cur_time - prev_time) as u32;
+                            let next_val = sma.next(dev as f64);
+                            deviation.push(dev);
                             if let Ok(mut val) = sma_val.try_lock() {
                                 *val = next_val;
                             }
@@ -61,6 +64,7 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
             Err(TryRecvError::Empty) => {}
         }
     }
+    npy::to_file("deviation.npy", deviation).unwrap();
 }
 
 pub fn main(args: Args) {
@@ -76,7 +80,7 @@ pub fn main(args: Args) {
 
     let fs = reader_spec.sample_rate;
     let num_channels = reader_spec.channels as u32;
-    let int_time: u64 = 2 * 5 * pow(10, 6);
+    let int_time: u32 = 2 * 5 * pow(10, 6);
 
     let sma_val = Arc::new(Mutex::new(0f64));
     let barrier = Arc::new(Barrier::new(2));
@@ -127,11 +131,11 @@ pub fn main(args: Args) {
             if pcm.state() != State::Running { pcm.start().unwrap() };
         } else {
             assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
-            print!("Deviation: {} ns\r", *sma_val.lock().unwrap() as u32);
+            let dev = *sma_val.lock().unwrap() as u32;
+            print!("Deviation: {} ns\r", dev);
             std::io::stdout().flush().unwrap();
         }
     }
-
 
     pcm.drain().unwrap();
     tx.send(()).unwrap();
