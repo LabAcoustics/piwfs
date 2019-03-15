@@ -37,7 +37,7 @@ pub fn main(_args : Args) {
             let cur_time = timer.wait();
             pin.toggle();
             if prev_time != 0f32 {
-                print!("Deviation: {} ns\r", pow(10u32, 9) * sma.next((int_time - (cur_time - prev_time)) as f64) as u32);
+                print!("Deviation: {} ns\r", (pow(10f64, 9) * sma.next((int_time - (cur_time - prev_time)) as f64)) as u32 * 2u32);
                 std::io::stdout().flush().unwrap();
             }
             prev_time = cur_time;
