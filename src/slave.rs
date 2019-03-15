@@ -68,8 +68,11 @@ pub fn main(args: Args) {
 
     let (tx, rx) = mpsc::channel();
 
-    let fs = 44100;
-    let num_channels : u32 = 2;
+    let mut reader = hound::WavReader::open("test.wav").unwrap();
+    let reader_spec = reader.spec();
+
+    let fs = reader_spec.sample_rate;
+    let num_channels = reader_spec.channels as u32;
     let int_time: u64 = 2 * 5 * pow(10, 6);
 
     let sma_val = Arc::new(Mutex::new(0f64));
@@ -97,14 +100,14 @@ pub fn main(args: Args) {
     swp.set_tstamp_mode(true).unwrap();
     pcm.sw_params(&swp).unwrap();
 
-    let mut reader = hound::WavReader::open("test.wav").unwrap();
-
     let sam_num = period_size as usize * num_channels as usize;
 
     loop {
-        let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
         let samples = reader.samples::<i16>();
-        let samples_len = samples.len();
+
+        if samples.len() == 0 { break; }
+        let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
+
         for sample in samples {
             buf.push(sample.unwrap());
             if buf.len() >= sam_num {
@@ -113,7 +116,6 @@ pub fn main(args: Args) {
         }
         assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
 
-        if samples_len == 0 { break; }
         println!("Deviation: {}", *sma_val.lock().unwrap());
     }
 
