@@ -23,19 +23,17 @@ pub fn main(_args : Args) {
     let child = thread::spawn(move || {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio.get(16).unwrap().into_output();
-        let mut timer = adi_clock::Timer::new(int_time/2.0);
         let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
         let mut prev_time = 0f32;
         for _ in 0..sma_num {
             sma.next(0f64);
         }
 
-	pin.set_reset_on_drop(false);
-	pin.set_high();
-        let mut high = true;
-
+	pin.set_low();
+        let mut high = false;
         let mut deviation: Vec<i32> = Vec::with_capacity((wait_time as f32/int_time) as usize);
 
+        let mut timer = adi_clock::Timer::new(int_time/2.0);
         loop {
             match rx.try_recv() {
                 Ok(_) | Err(TryRecvError::Disconnected) => break,
@@ -44,7 +42,7 @@ pub fn main(_args : Args) {
             let cur_time = timer.wait();
             pin.toggle();
             high = !high;
-            if !high {
+            if high {
                 if prev_time != 0f32 {
                     let dev = pow(10.0, 9)*(int_time - (cur_time - prev_time));
                     deviation.push(dev as i32);
@@ -54,7 +52,6 @@ pub fn main(_args : Args) {
                 prev_time = cur_time;
             }
         }
-	pin.set_high();
         npy::to_file("deviation.npy", deviation).unwrap();
     });
 
