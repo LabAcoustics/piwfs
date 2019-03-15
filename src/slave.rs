@@ -131,7 +131,7 @@ pub fn main(args: Args) {
             if pcm.state() != State::Running { pcm.start().unwrap() };
         } else {
             assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
-            let dev = *sma_val.lock().unwrap() as u32;
+            let dev = *sma_val.lock().unwrap() as i32;
             print!("Deviation: {} ns\r", dev);
             std::io::stdout().flush().unwrap();
         }
