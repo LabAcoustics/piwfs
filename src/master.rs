@@ -1,10 +1,13 @@
 use std::thread;
+use std::io::Write;
 use std::sync::mpsc::{self, TryRecvError};
-use mio::{Events, Poll, Ready, PollOpt, Token};
-use mio::net::TcpStream;
 use std::net::{TcpListener, SocketAddr};
 
 use rppal::gpio::Gpio;
+use ta::indicators::SimpleMovingAverage;
+use ta::Next;
+use mio::{Events, Poll, Ready, PollOpt, Token};
+use mio::net::TcpStream;
 
 use super::Args;
 
@@ -14,7 +17,15 @@ pub fn main(_args : Args) {
     let child = thread::spawn(move || {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio.get(16).unwrap().into_output();
-        let mut timer = adi_clock::Timer::new(0.005);
+        let int_time = 0.005;
+        let mut timer = adi_clock::Timer::new(int_time);
+        let sma_num = 1000;
+        let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
+        let mut prev_time = 0f32;
+        for _ in 0..sma_num {
+            sma.next(0f64);
+        }
+
 	pin.set_reset_on_drop(false);
 
         loop {
@@ -22,8 +33,13 @@ pub fn main(_args : Args) {
                 Ok(_) | Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => {}
             }
-            timer.wait();
+            let cur_time = timer.wait();
             pin.toggle();
+            if prev_time != 0f32 {
+                print!("Deviation: {} s\r", sma.next((int_time - (cur_time - prev_time)) as f64));
+                std::io::stdout().flush().unwrap();
+            }
+            prev_time = cur_time;
         }
 	pin.set_high();
     });
@@ -51,7 +67,7 @@ pub fn main(_args : Args) {
     });
 
 
-    thread::sleep(std::time::Duration::new(5, 0));
+    thread::sleep(std::time::Duration::new(300, 0));
     tx.send(()).unwrap();
     net_th.join().unwrap();
     child.join().unwrap();

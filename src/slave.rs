@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex, Barrier};
 use std::sync::mpsc::{self, TryRecvError, Receiver};
+use std::io::Write;
 use std::thread;
 
 use rppal::gpio::{Gpio, Trigger, InputPin};
@@ -126,7 +127,8 @@ pub fn main(args: Args) {
             if pcm.state() != State::Running { pcm.start().unwrap() };
         } else {
             assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
-            println!("Deviation: {}", *sma_val.lock().unwrap());
+            print!("Deviation: {} ns\r", *sma_val.lock().unwrap() as u32);
+            std::io::stdout().flush().unwrap();
         }
     }
 
