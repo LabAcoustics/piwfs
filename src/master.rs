@@ -18,12 +18,12 @@ pub fn main(_args : Args) {
 
     let wait_time: u64 = 300;
     let sma_num = 1000;
-    let int_time: f32 = 0.005;
+    let int_time: f32 = 0.01;
 
     let child = thread::spawn(move || {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio.get(16).unwrap().into_output();
-        let mut timer = adi_clock::Timer::new(int_time);
+        let mut timer = adi_clock::Timer::new(int_time/2.0);
         let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
         let mut prev_time = 0f32;
         for _ in 0..sma_num {
@@ -31,6 +31,8 @@ pub fn main(_args : Args) {
         }
 
 	pin.set_reset_on_drop(false);
+	pin.set_high();
+        let mut high = true;
 
         let mut deviation: Vec<i32> = Vec::with_capacity((wait_time as f32/int_time) as usize);
 
@@ -41,13 +43,16 @@ pub fn main(_args : Args) {
             }
             let cur_time = timer.wait();
             pin.toggle();
-            if prev_time != 0f32 {
-                let dev = pow(10.0, 9)*2.0*(int_time - (cur_time - prev_time));
-                deviation.push(dev as i32);
-                print!("Deviation: {} ns\r", sma.next(dev as f64) as i32);
-                std::io::stdout().flush().unwrap();
+            high = !high;
+            if !high {
+                if prev_time != 0f32 {
+                    let dev = pow(10.0, 9)*(int_time - (cur_time - prev_time));
+                    deviation.push(dev as i32);
+                    print!("Deviation: {} ns\r", sma.next(dev as f64) as i32);
+                    std::io::stdout().flush().unwrap();
+                }
+                prev_time = cur_time;
             }
-            prev_time = cur_time;
         }
 	pin.set_high();
         npy::to_file("deviation.npy", deviation).unwrap();
