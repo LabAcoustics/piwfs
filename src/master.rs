@@ -16,7 +16,7 @@ use super::Args;
 pub fn main(args : Args) {
     let (tx, rx) = mpsc::channel();
 
-    let wait_time: u64 = 300;
+    let wait_time: u64 = args.flag_time;
     let sma_num = 1000;
     let int_time: f32 = 0.01;
 
