@@ -75,7 +75,7 @@ pub fn main(args: Args) {
 
     let (tx, rx) = mpsc::channel();
 
-    let mut reader = hound::WavReader::open("test.wav").unwrap();
+    let mut reader = hound::WavReader::open(args.flag_testfile).unwrap();
     let reader_spec = reader.spec();
 
     let fs = reader_spec.sample_rate;

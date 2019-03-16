@@ -11,19 +11,21 @@ Raspberry Pi Wave Field Synthesis System
 
 Usage:
   piwfs master [--verbose]
-  piwfs slave [--device=<dev>] [--verbose]
+  piwfs slave [--device=<dev>] [--verbose] [--testfile=<testf>]
   piwfs (-h | --help)
 
 Options:
-  -h --help        Show this screen.
-  --device=<dev>   Select ALSA device [default: hw:0]
-  --verbose        Print messages while working
+  -h --help           Show this screen.
+  --device=<dev>      Select ALSA device [default: hw:0,0]
+  --verbose           Print messages while working
+  --testfile=<testf>  Load a test file to play [default: test.wav]
 ";
 
 #[derive(Debug, Deserialize)]
 pub struct Args {
     pub flag_device: String,
     pub flag_verbose: bool,
+    pub flag_testfile: String,
     cmd_master: bool,
     cmd_slave: bool,
 }
