@@ -10,18 +10,20 @@ const USAGE: &'static str = "
 Raspberry Pi Wave Field Synthesis System
 
 Usage:
-  piwfs master
-  piwfs slave [--device=<dev>]
+  piwfs master [--verbose]
+  piwfs slave [--device=<dev>] [--verbose]
   piwfs (-h | --help)
 
 Options:
   -h --help        Show this screen.
   --device=<dev>   Select ALSA device [default: hw:0]
+  --verbose        Print messages while working
 ";
 
 #[derive(Debug, Deserialize)]
 pub struct Args {
     pub flag_device: String,
+    pub flag_verbose: bool,
     cmd_master: bool,
     cmd_slave: bool,
 }
