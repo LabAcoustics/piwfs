@@ -5,7 +5,7 @@ use std::thread;
 
 use rppal::gpio::{Gpio, Trigger, InputPin};
 use alsa::{Direction, ValueOr};
-use alsa::pcm::{PCM, HwParams, Format, Access, State};
+use alsa::pcm::{PCM, HwParams, Format, Access};
 use alsa::direct::pcm::SyncPtrStatus;
 use num::pow;
 use ta::indicators::SimpleMovingAverage;
@@ -105,7 +105,7 @@ pub fn main(args: Args) {
     let swp = pcm.sw_params_current().unwrap();
     let period_size = hwp.get_period_size().unwrap();
     let buffer_size = hwp.get_buffer_size().unwrap();
-    swp.set_start_threshold(period_size - buffer_size).unwrap();
+    swp.set_start_threshold(buffer_size - period_size + 1).unwrap();
     swp.set_tstamp_mode(true).unwrap();
     pcm.sw_params(&swp).unwrap();
 
@@ -126,9 +126,9 @@ pub fn main(args: Args) {
 
         if first_time {
             first_time = false;
-            barrier.wait();
             assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
-            if pcm.state() != State::Running { pcm.start().unwrap() };
+            barrier.wait();
+            pcm.start().unwrap();
         } else {
             assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
             let dev = *sma_val.lock().unwrap() as i32;
