@@ -10,6 +10,7 @@ use alsa::direct::pcm::SyncPtrStatus;
 use num::pow;
 use ta::indicators::SimpleMovingAverage;
 use ta::Next;
+use samplerate::{Samplerate, ConverterType};
 use hound;
 
 use super::Args;
@@ -27,10 +28,7 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
                 int_time: u32, rx: &Receiver<()>, sma_num: u32, barrier: &Arc<Barrier>)
 {
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
-    let mut first_time = true;
-    for _ in 0..sma_num {
-        sma.next(0f64);
-    }
+    let mut counter = 0;
     let mut deviation: Vec<i32> = Vec::with_capacity((300f64/int_time as f64) as usize);
     let mut prev_time: u64 = 0;
     pin.set_interrupt(Trigger::RisingEdge).unwrap();
@@ -42,7 +40,8 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
             Ok(_) => {
                 match unsafe { SyncPtrStatus::sync_ptr(*pcm_fd, true, None, None) } {
                     Ok(status) => {
-                        if first_time { first_time = false; barrier.wait(); }
+                        if counter < sma_num { counter += 1; }
+                        else if counter == sma_num { barrier.wait(); }
                         let cur_time = status.htstamp().tv_sec as u64 * pow::pow(10u64,9) + status.htstamp().tv_nsec as u64;
                         if prev_time != 0 {
                             let dev = int_time as i32 - (cur_time - prev_time) as i32;
@@ -79,7 +78,7 @@ pub fn main(args: Args) {
     let reader_spec = reader.spec();
 
     let fs = reader_spec.sample_rate;
-    let num_channels = reader_spec.channels as u32;
+    let num_channels = reader_spec.channels as usize;
     let int_time: u32 = 2 * 5 * pow(10, 6);
 
     let sma_val = Arc::new(Mutex::new(0f64));
@@ -94,28 +93,29 @@ pub fn main(args: Args) {
     };
 
     let hwp = HwParams::any(&pcm).unwrap();
-    hwp.set_channels(num_channels).unwrap();
+    hwp.set_channels(num_channels as u32).unwrap();
     hwp.set_rate(fs, ValueOr::Nearest).unwrap();
-    hwp.set_format(Format::s16()).unwrap();
+    hwp.set_format(Format::float()).unwrap();
     hwp.set_access(Access::RWInterleaved).unwrap();
     pcm.hw_params(&hwp).unwrap();
-    let io = pcm.io_i16().unwrap();
+    let io = pcm.io_f32().unwrap();
 
     let hwp = pcm.hw_params_current().unwrap();
     let swp = pcm.sw_params_current().unwrap();
     let period_size = hwp.get_period_size().unwrap();
     let buffer_size = hwp.get_buffer_size().unwrap();
-    swp.set_start_threshold(buffer_size - period_size + 1).unwrap();
+    swp.set_start_threshold(buffer_size).unwrap();
     swp.set_tstamp_mode(true).unwrap();
     pcm.sw_params(&swp).unwrap();
 
-    let sam_num = period_size as usize * num_channels as usize;
+    let sam_num = period_size as usize * num_channels;
     let mut first_time = true;
+    let mut converter = Samplerate::new(ConverterType::SincFastest, 1, 1, num_channels).unwrap();
     loop {
-        let samples = reader.samples::<i16>();
+        let samples = reader.samples::<f32>();
 
         if samples.len() == 0 { break; }
-        let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
+        let mut buf: Vec<f32> = Vec::with_capacity(sam_num);
 
         for sample in samples {
             buf.push(sample.unwrap());
@@ -126,13 +126,18 @@ pub fn main(args: Args) {
 
         if first_time {
             first_time = false;
-            assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
+            assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels);
             barrier.wait();
             pcm.start().unwrap();
-        } else {
-            assert_eq!(io.writei(&buf[..]).unwrap(), buf.len()/num_channels as usize);
             let dev = *sma_val.lock().unwrap() as i32;
+            converter = Samplerate::new(ConverterType::SincMediumQuality,
+                                        int_time, (int_time as i32 + dev) as u32,
+                                        num_channels).unwrap();
+        } else {
+            let resampled = converter.process(&buf[..]).unwrap();
+            assert_eq!(io.writei(&resampled).unwrap(), resampled.len()/num_channels);
             if args.flag_verbose {
+                let dev = *sma_val.lock().unwrap() as i32;
                 print!("Deviation: {} ns \r", dev);
                 std::io::stdout().flush().unwrap();
             }
