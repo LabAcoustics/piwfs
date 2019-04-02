@@ -26,7 +26,7 @@ fn pcm_to_fd(p: &PCM) -> alsa::Result<std::os::unix::io::RawFd> {
 
 fn vec_f32_to_i16(vec: &[f32]) -> Vec<i16> {
     return vec.into_iter().map(|&e| {
-        (e * std::i16::MAX as f32) as i16
+        (e * (std::i16::MAX as f32)) as i16
     }).collect();
 }
 
@@ -139,7 +139,7 @@ pub fn main(args: Args) {
         let mut buf: Vec<f32> = Vec::with_capacity(sam_num);
 
         for sample in samples {
-            buf.push(sample.unwrap() as f32 / std::i32::MAX as f32);
+            buf.push((sample.unwrap() as f32) / (std::i16::MAX as f32));
             if buf.len() >= sam_num {
                 break;
             }
