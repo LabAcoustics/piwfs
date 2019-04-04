@@ -175,10 +175,11 @@ pub fn main(args: Args) {
             barrier.wait();
             pcm.start().unwrap();
         } else {
+            let dev = *sma_val.lock().unwrap() as i32;
+            converter.set_to_rate((int_time as i32 + dev) as u32);
             let resampled = converter.process(&buf[..]).unwrap();
             assert_eq!(io.writei(&vec_f32_to_i16(&resampled)).unwrap(), resampled.len()/num_channels);
             if args.flag_verbose {
-                let dev = *sma_val.lock().unwrap() as i32;
                 print!("Deviation: {} ns \r", dev);
                 std::io::stdout().flush().unwrap();
             }
