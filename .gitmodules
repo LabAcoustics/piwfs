@@ -1,6 +1,0 @@
-[submodule "libsamplerate-sys"]
-	path = libsamplerate-sys
-	url = git@github.com:Ashymad/libsamplerate-sys
-[submodule "rust-samplerate"]
-	path = rust-samplerate
-	url = git@github.com:Ashymad/rust-samplerate
