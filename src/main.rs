@@ -10,7 +10,7 @@ const USAGE: &'static str = "
 Raspberry Pi Wave Field Synthesis System
 
 Usage:
-  piwfs master [--verbose] [--time=<t>]
+  piwfs master [--time=<t>]
   piwfs slave [--device=<dev>] [--verbose] [--testfile=<testf>]
   piwfs (-h | --help)
 

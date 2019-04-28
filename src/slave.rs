@@ -37,14 +37,11 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
     let mut counter = 0;
     let mut next_barrier = 0;
-    let mut deviation: Vec<i32> = Vec::with_capacity((300f64/int_time as f64) as usize);
+    let max_dev = 10000;
     let mut prev_time: u64 = 0;
     pin.set_interrupt(Trigger::RisingEdge).unwrap();
     loop {
-        match pin.poll_interrupt(true, Some(std::time::Duration::from_nanos(2*int_time as u64))) {
-            Ok(None) => {
-                prev_time = 0;
-            }
+        match pin.poll_interrupt(true, None) {
             Ok(_) => {
                 match unsafe { SyncPtrStatus::sync_ptr(*pcm_fd, true, None, None) } {
                     Ok(status) => {
@@ -56,10 +53,11 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
                         let cur_time = status.htstamp().tv_sec as u64 * pow::pow(10u64,9) + status.htstamp().tv_nsec as u64;
                         if prev_time != 0 {
                             let dev = int_time as i32 - (cur_time - prev_time) as i32;
-                            let next_val = sma.next(dev as f64);
-                            deviation.push(dev);
-                            if let Ok(mut val) = sma_val.try_lock() {
-                                *val = next_val;
+                            if dev.abs() < max_dev {
+                                let next_val = sma.next(dev as f64);
+                                if let Ok(mut val) = sma_val.try_lock() {
+                                    *val = next_val;
+                                }
                             }
                         }
                         prev_time = cur_time;
@@ -81,7 +79,6 @@ fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: 
             Err(TryRecvError::Empty) => {}
         }
     }
-    npy::to_file("deviation.npy", deviation).unwrap();
 }
 
 pub fn main(args: Args) {
