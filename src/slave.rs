@@ -12,6 +12,7 @@ use ta::indicators::SimpleMovingAverage;
 use ta::Next;
 use samplerate::{Samplerate, ConverterType};
 use hound;
+use thread_priority::{ThreadPriority, ThreadSchedulePolicy, NormalThreadSchedulePolicy};
 
 use super::Args;
 
@@ -32,12 +33,14 @@ fn vec_f32_to_i16(vec: &[f32]) -> Vec<i16> {
 
 fn synch_status(pin: &mut InputPin, pcm_fd: &std::os::unix::io::RawFd, sma_val: &Arc<Mutex<f64>>,
                 int_counter: &Arc<Mutex<u64>>, int_time: u32, rx: &Receiver<u64>, sma_num: u32,
-                barrier: &Arc<Barrier>)
-{
+                barrier: &Arc<Barrier>) {
+    thread_priority::set_thread_priority(thread_priority::thread_native_id(),
+        ThreadPriority::Max,
+        ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Normal)).unwrap();
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
     let mut counter = 0;
     let mut next_barrier = 0;
-    let max_dev = 10000;
+    let max_dev = (int_time / 1000) as i32;
     let mut prev_time: u64 = 0;
     pin.set_interrupt(Trigger::RisingEdge).unwrap();
     loop {
