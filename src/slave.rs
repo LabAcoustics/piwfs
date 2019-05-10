@@ -31,17 +31,20 @@ fn synch_status(sma_val: &Arc<Mutex<f64>>, int_counter: &Arc<Mutex<u64>>,
     let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
     let mut counter = 0;
     let mut next_barrier = 0;
+    let max_dev = int_time/pow(10,4);
     let mut rfrpi = match File::open("/dev/rfrpi") {
         Ok(res) => res,
         Err(err) => panic!("Couldn't open /dev/rfrpi: {}", err),
     };
     let rfrpi_pfd = PollFd::new(rfrpi.as_raw_fd(), EventFlags::POLLIN);
-    let mut int_times_buf = [0; 5000];
-    if let Err(err) = rfrpi.read(&mut int_times_buf) {
-        panic!("Couldn't read from /dev/rfrpi: {}", err);
-    }
+    let mut int_times_buf = [0; 10000];
+    while match rfrpi.read(&mut int_times_buf) {
+        Err(err) => panic!("Couldn't read from /dev/rfrpi: {}", err),
+        Ok(size) => size,
+    } > 0 {};
     loop {
-        match poll(&mut [rfrpi_pfd], -1) {
+        match poll(&mut [rfrpi_pfd], (int_time/500000) as i32) {
+            Ok(0) => {}
             Ok(_) => {
                 let int_times_str = match rfrpi.read(&mut int_times_buf) {
                     Ok(size) => String::from_utf8(int_times_buf[..size].into()).unwrap(),
@@ -54,10 +57,12 @@ fn synch_status(sma_val: &Arc<Mutex<f64>>, int_counter: &Arc<Mutex<u64>>,
                 if counter == next_barrier { barrier.wait(); }
                 int_times_str.lines().for_each(|line| {
                     let dev = int_time as i32 - i32::from_str_radix(&line, 10).unwrap();
-                    let next_val = sma.next(dev as f64);
-                    if let Ok(mut val) = sma_val.try_lock() {
-                        *val = next_val;
-                    }
+		    if dev.abs() < max_dev as i32 {
+			    let next_val = sma.next(dev as f64);
+			    if let Ok(mut val) = sma_val.try_lock() {
+				    *val = next_val;
+			    }
+		    }
                 });
             }
             Err(_) => panic!("Error polling interrupt!")
@@ -80,10 +85,10 @@ pub fn main(args: Args) {
 
     let fs = reader_spec.sample_rate;
     let num_channels = reader_spec.channels as usize;
-    let int_time: u32 = 2 * 5 * pow(10, 6);
+    let int_time: u32 = pow(10, 9)/args.flag_frequency;
 
     let sma_val = Arc::new(Mutex::new(0f64));
-    let sma_num = 1000;
+    let sma_num = 10 * args.flag_frequency;
     let int_counter = Arc::new(Mutex::new(0u64));
     let barrier = Arc::new(Barrier::new(2));
     let sync_thr = {
@@ -112,11 +117,10 @@ pub fn main(args: Args) {
 
     let sam_num = period_size as usize * num_channels;
     let mut first_time = true;
-    let mut converter = Samplerate::new(ConverterType::Linear, 1, 1, num_channels).unwrap();
+    let mut converter = Samplerate::new(ConverterType::SincFastest, int_time, int_time, num_channels).unwrap();
     loop {
         let samples =  reader.samples::<i16>();
 
-        if samples.len() == 0 { break; }
         let mut buf: Vec<f32> = Vec::with_capacity(sam_num);
 
         for sample in samples {
@@ -128,36 +132,45 @@ pub fn main(args: Args) {
 
         if first_time {
             first_time = false;
-            let wait_for = sma_num as u64;
-            if args.flag_verbose { println!("Measuring deviation..."); }
-            while *int_counter.lock().unwrap() < wait_for {
+            let resampled = if args.flag_no_resampling {
+                tx.send(1).unwrap();
+                buf
+            } else {
+                if args.flag_verbose { println!("Waiting for sma..."); }
+                tx.send(sma_num as u64).unwrap();
+                barrier.wait();
+                let dev = *sma_val.lock().unwrap() as i32;
                 if args.flag_verbose {
-                    let dev = *sma_val.lock().unwrap() as i32;
-                    print!("Deviation: {} ns \r", dev);
+                    print!("Deviation: {} μs/s        \r", (pow(10i64,6)*dev as i64)/(int_time as i64));
                     std::io::stdout().flush().unwrap();
                 }
-            }
-            let dev = *sma_val.lock().unwrap() as i32;
-            converter = Samplerate::new(ConverterType::Linear,
-                                        int_time, (int_time as i32 + dev) as u32,
-                                        num_channels).unwrap();
-            let resampled = converter.process(&buf[..]).unwrap();
-            if args.flag_verbose { println!("\nSamplerate converter prepared..."); }
+                converter.set_to_rate((int_time as i32 - dev) as u32);
+                tx.send(sma_num as u64 + 100).unwrap();
+                converter.process(&buf[..]).unwrap()
+            };
             assert_eq!(io.writei(&vec_f32_to_i16(&resampled)).unwrap(), resampled.len()/num_channels);
             assert_eq!(pcm.state(), State::Prepared);
-            tx.send(wait_for + 100).unwrap();
-            if args.flag_verbose { println!("Waiting for interrupt..."); }
+            if args.flag_verbose {
+                println!("\nWaiting for play...");
+            }
             barrier.wait();
             pcm.start().unwrap();
         } else {
-            let dev = *sma_val.lock().unwrap() as i32;
-            converter.set_to_rate((int_time as i32 + dev) as u32);
-            let resampled = converter.process(&buf[..]).unwrap();
+            let buf_len = buf.len();
+            let resampled = if args.flag_no_resampling {
+                buf
+            } else if buf_len > 0 {
+                converter.process(&buf[..]).unwrap()
+            } else {
+                converter.process_last(&buf[..]).unwrap()
+            };
             assert_eq!(io.writei(&vec_f32_to_i16(&resampled)).unwrap(), resampled.len()/num_channels);
             if args.flag_verbose {
-                print!("Deviation: {} ns \r", dev);
+                let dev = *sma_val.lock().unwrap() as i32;
+                print!("Deviation: {} μs/s        \r", (pow(10i64,6)*dev as i64)/(int_time as i64));
                 std::io::stdout().flush().unwrap();
             }
+            if buf_len == 0 { break; }
         }
     }
     if args.flag_verbose { println!("\nWaiting for PCM..."); }

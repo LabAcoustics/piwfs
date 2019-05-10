@@ -9,10 +9,8 @@ use super::Args;
 
 pub fn main(args : Args) {
     let wait_time: u64 = args.flag_time;
-    let int_time: f64 = 0.01;
 
-    let pwm = Pwm::with_frequency(Channel::Pwm0, 1.0/int_time, 0.5, Polarity::Normal, true).unwrap();
-
+    let pwm = Pwm::with_frequency(Channel::Pwm0, args.flag_frequency as f64, 0.5, Polarity::Normal, true).unwrap();
 
     let net_th = thread::spawn(move || {
         let addr: SocketAddr = "0.0.0.0:10000".parse().unwrap();
