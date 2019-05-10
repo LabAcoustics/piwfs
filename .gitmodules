@@ -1,0 +1,3 @@
+[submodule "rust-samplerate"]
+	path = rust-samplerate
+	url = git@github.com:Ashymad/rust-samplerate

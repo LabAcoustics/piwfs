@@ -16,5 +16,12 @@ num = "0.2"
 mio = "0.6"
 ta = "0.1"
 hound = "3.4"
-samplerate = "0.2"
+samplerate = { path = "./rust-samplerate"}
 thread-priority = "0.1"
+nix = "0.13"
+
+[workspace]
+
+members = [
+    "rust-samplerate",
+]
