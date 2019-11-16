@@ -36,7 +36,7 @@ fn synch_status(sma_val: &Arc<Mutex<f64>>, int_counter: &Arc<Mutex<u64>>,
         Ok(res) => res,
         Err(err) => panic!("Couldn't open /dev/rfrpi: {}", err),
     };
-    let rfrpi_pfd = PollFd::new(rfrpi.as_raw_fd(), EventFlags::POLLIN);
+    let rfrpi_pfd = PollFd::new(rfrpi.as_raw_fd(), PollFlags::POLLIN);
     let mut int_times_buf = [0; 10000];
     while match rfrpi.read(&mut int_times_buf) {
         Err(err) => panic!("Couldn't read from /dev/rfrpi: {}", err),
