@@ -29,6 +29,8 @@ pub fn main(args: Args) {
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
 
+    let mut first_time = true;
+
     loop {
         let samples =  reader.samples::<i16>();
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
@@ -45,7 +47,11 @@ pub fn main(args: Args) {
         print!("Cur time: {}:{}", audio_time.tv_sec, audio_time.tv_nsec);
 
         assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
-        assert_eq!(pcm.state(), State::Prepared);
-        pcm.start().unwrap();
+        if first_time {
+            first_time = false;
+            assert_eq!(pcm.state(), State::Prepared);
+            pcm.start().unwrap();
+        }
+        if buf.len() == 0 { break; }
     }
 }
