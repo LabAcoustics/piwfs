@@ -1,104 +1,17 @@
-use std::sync::{Arc, Mutex, Barrier};
-use std::sync::mpsc::{self, TryRecvError, Receiver};
-use std::io::Write;
-use std::thread;
-use std::fs::File;
-use std::io::prelude::*;
-use std::os::unix::io::AsRawFd;
-
 use alsa::{Direction, ValueOr};
 use alsa::pcm::{PCM, HwParams, Format, Access, State};
-use num::pow;
-use ta::indicators::SimpleMovingAverage;
-use ta::Next;
-use samplerate::{Samplerate, ConverterType};
 use hound;
-use thread_priority::{ThreadPriority, ThreadSchedulePolicy, NormalThreadSchedulePolicy};
-use nix::poll::*;
 
 use super::Args;
 
-fn vec_f32_to_i16(vec: &[f32]) -> Vec<i16> {
-    return vec.into_iter().map(|&e| {
-        (e * (std::i16::MAX as f32)) as i16
-    }).collect();
-}
-
-fn synch_status(sma_val: &Arc<Mutex<f64>>, int_counter: &Arc<Mutex<u64>>,
-                int_time: u32, rx: &Receiver<u64>, sma_num: u32, barrier: &Arc<Barrier>) {
-    thread_priority::set_thread_priority(thread_priority::thread_native_id(), ThreadPriority::Max,
-                ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Normal)).unwrap();
-    let mut sma = SimpleMovingAverage::new(sma_num).unwrap();
-    let mut counter = 0;
-    let mut next_barrier = 0;
-    let max_dev = int_time/pow(10,4);
-    let mut rfrpi = match File::open("/dev/rfrpi") {
-        Ok(res) => res,
-        Err(err) => panic!("Couldn't open /dev/rfrpi: {}", err),
-    };
-    let rfrpi_pfd = PollFd::new(rfrpi.as_raw_fd(), PollFlags::POLLIN);
-    let mut int_times_buf = [0; 10000];
-    while match rfrpi.read(&mut int_times_buf) {
-        Err(err) => panic!("Couldn't read from /dev/rfrpi: {}", err),
-        Ok(size) => size,
-    } > 0 {};
-    loop {
-        match poll(&mut [rfrpi_pfd], (int_time/500000) as i32) {
-            Ok(0) => {}
-            Ok(_) => {
-                let int_times_str = match rfrpi.read(&mut int_times_buf) {
-                    Ok(size) => String::from_utf8(int_times_buf[..size].into()).unwrap(),
-                    Err(err) => panic!("Couldn't read from /dev/rfrpi: {}", err),
-                };
-                counter += 1;
-                if let Ok(mut val) = int_counter.try_lock() {
-                    *val = counter;
-                }
-                if counter == next_barrier { barrier.wait(); }
-                int_times_str.lines().for_each(|line| {
-                    let dev = int_time as i32 - i32::from_str_radix(&line, 10).unwrap();
-		    if dev.abs() < max_dev as i32 {
-			    let next_val = sma.next(dev as f64);
-			    if let Ok(mut val) = sma_val.try_lock() {
-				    *val = next_val;
-			    }
-		    }
-                });
-            }
-            Err(_) => panic!("Error polling interrupt!")
-        }
-        match rx.try_recv() {
-            Ok(0) | Err(TryRecvError::Disconnected) => break,
-            Ok(n_bar) => next_barrier = n_bar,
-            Err(TryRecvError::Empty) => {}
-        }
-    }
-}
-
 pub fn main(args: Args) {
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
-
-    let (tx, rx) = mpsc::channel();
 
     let mut reader = hound::WavReader::open(args.flag_testfile).unwrap();
     let reader_spec = reader.spec();
 
     let fs = reader_spec.sample_rate;
     let num_channels = reader_spec.channels as usize;
-    let int_time: u32 = pow(10, 9)/args.flag_frequency;
-
-    let sma_val = Arc::new(Mutex::new(0f64));
-    let sma_num = 10 * args.flag_frequency;
-    let int_counter = Arc::new(Mutex::new(0u64));
-    let barrier = Arc::new(Barrier::new(2));
-    let sync_thr = {
-        let sma_val = sma_val.clone();
-        let int_counter = int_counter.clone();
-        let barrier = barrier.clone();
-        thread::spawn(move || {
-            synch_status(&sma_val, &int_counter, int_time, &rx, sma_num, &barrier)
-        })
-    };
 
     let hwp = HwParams::any(&pcm).unwrap();
     hwp.set_channels(num_channels as u32).unwrap();
@@ -114,68 +27,25 @@ pub fn main(args: Args) {
     let buffer_size = hwp.get_buffer_size().unwrap();
     swp.set_start_threshold(buffer_size).unwrap();
     pcm.sw_params(&swp).unwrap();
-
     let sam_num = period_size as usize * num_channels;
-    let mut first_time = true;
-    let mut converter = Samplerate::new(ConverterType::SincFastest, int_time, int_time, num_channels).unwrap();
+
     loop {
         let samples =  reader.samples::<i16>();
-
-        let mut buf: Vec<f32> = Vec::with_capacity(sam_num);
-
+        let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
         for sample in samples {
-            buf.push((sample.unwrap() as f32) / (std::i16::MAX as f32));
+            buf.push(sample.unwrap());
             if buf.len() >= sam_num {
                 break;
             }
         }
 
-        if first_time {
-            first_time = false;
-            let resampled = if args.flag_no_resampling {
-                tx.send(1).unwrap();
-                buf
-            } else {
-                if args.flag_verbose { println!("Waiting for sma..."); }
-                tx.send(sma_num as u64).unwrap();
-                barrier.wait();
-                let dev = *sma_val.lock().unwrap() as i32;
-                if args.flag_verbose {
-                    print!("Deviation: {} μs/s        \r", (pow(10i64,6)*dev as i64)/(int_time as i64));
-                    std::io::stdout().flush().unwrap();
-                }
-                converter.set_to_rate((int_time as i32 - dev) as u32);
-                tx.send(sma_num as u64 + 100).unwrap();
-                converter.process(&buf[..]).unwrap()
-            };
-            assert_eq!(io.writei(&vec_f32_to_i16(&resampled)).unwrap(), resampled.len()/num_channels);
-            assert_eq!(pcm.state(), State::Prepared);
-            if args.flag_verbose {
-                println!("\nWaiting for play...");
-            }
-            barrier.wait();
-            pcm.start().unwrap();
-        } else {
-            let buf_len = buf.len();
-            let resampled = if args.flag_no_resampling {
-                buf
-            } else if buf_len > 0 {
-                converter.process(&buf[..]).unwrap()
-            } else {
-                converter.process_last(&buf[..]).unwrap()
-            };
-            assert_eq!(io.writei(&vec_f32_to_i16(&resampled)).unwrap(), resampled.len()/num_channels);
-            if args.flag_verbose {
-                let dev = *sma_val.lock().unwrap() as i32;
-                print!("Deviation: {} μs/s        \r", (pow(10i64,6)*dev as i64)/(int_time as i64));
-                std::io::stdout().flush().unwrap();
-            }
-            if buf_len == 0 { break; }
-        }
+        let status = pcm.status().unwrap();
+
+        let audio_time = status.get_audio_htstamp();
+        print!("Cur time: {}:{}", audio_time.tv_sec, audio_time.tv_nsec);
+
+        assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
+        assert_eq!(pcm.state(), State::Prepared);
+        pcm.start().unwrap();
     }
-    if args.flag_verbose { println!("\nWaiting for PCM..."); }
-    pcm.drain().unwrap();
-    if args.flag_verbose { println!("Stopping sync thread..."); }
-    tx.send(0).unwrap();
-    sync_thr.join().unwrap();
 }
