@@ -26,6 +26,8 @@ pub fn main(args: Args) {
     let period_size = hwp.get_period_size().unwrap();
     let buffer_size = hwp.get_buffer_size().unwrap();
     swp.set_start_threshold(buffer_size).unwrap();
+    swp.set_tstamp_mode(true).unwrap();
+    swp.set_tstamp_type().unwrap();
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
 
@@ -42,9 +44,9 @@ pub fn main(args: Args) {
         }
 
         let status = pcm.status().unwrap();
+        let time = status.get_htstamp();
 
-        let audio_time = status.get_audio_htstamp();
-        print!("Cur time: {}:{}", audio_time.tv_sec, audio_time.tv_nsec);
+        print!("Cur time: {}:{}\r", time.tv_sec, time.tv_nsec);
 
         assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
         if first_time {

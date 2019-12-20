@@ -1,0 +1,6 @@
+[submodule "alsa-rs"]
+	path = alsa-rs
+	url = https://github.com/Ashymad/alsa-rs
+[submodule "alsa-sys"]
+	path = alsa-sys
+	url = https://github.com/Ashymad/alsa-sys
