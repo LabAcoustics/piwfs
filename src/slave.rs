@@ -2,6 +2,8 @@ use alsa::{Direction, ValueOr};
 use alsa::pcm::{PCM, HwParams, Format, Access, State};
 use hound;
 
+use num::pow;
+
 use super::Args;
 
 pub fn main(args: Args) {
@@ -32,6 +34,7 @@ pub fn main(args: Args) {
     let sam_num = period_size as usize * num_channels;
 
     let mut first_time = true;
+    let mut sam_pushed = 0;
 
     loop {
         let samples =  reader.samples::<i16>();
@@ -44,11 +47,16 @@ pub fn main(args: Args) {
         }
 
         let status = pcm.status().unwrap();
-        let time = status.get_htstamp();
+        let htstamp = status.get_htstamp();
+        let delay = status.get_delay();
 
-        print!("Cur time: {}:{}\r", time.tv_sec, time.tv_nsec);
+        let time = (htstamp.tv_sec as i64)*pow(10,9) + (delay as i64)*pow(10,9)/(fs as i64) + htstamp.tv_nsec as i64;
+
+        print!("Next sample {} will play at {}\r", sam_pushed, time);
 
         assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
+        sam_pushed += (buf.len()/num_channels) as i32;
+
         if first_time {
             first_time = false;
             assert_eq!(pcm.state(), State::Prepared);
@@ -56,4 +64,5 @@ pub fn main(args: Args) {
         }
         if buf.len() == 0 { break; }
     }
+    pcm.drain().unwrap();
 }
