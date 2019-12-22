@@ -2,6 +2,8 @@ use alsa::{Direction, ValueOr};
 use alsa::pcm::{PCM, HwParams, Format, Access, State};
 use hound;
 
+use std::convert::TryInto;
+
 use num::pow;
 
 use super::Args;
@@ -34,28 +36,34 @@ pub fn main(args: Args) {
     let sam_num = period_size as usize * num_channels;
 
     let mut first_time = true;
-    let mut sam_pushed = 0;
+    let sample_duration = pow(10,9)/(fs as u64);
 
     loop {
-        let samples =  reader.samples::<i16>();
+        let status = pcm.status().unwrap();
+        let htstamp = status.get_htstamp();
+        let delay = status.get_delay();
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
-        for sample in samples {
-            buf.push(sample.unwrap());
+        let mut next_sample_time = (htstamp.tv_sec as u64)*pow(10,9) + (delay as u64 + 1)*sample_duration + htstamp.tv_nsec as u64;
+        while args.flag_startat > next_sample_time {
+            buf.push(0);
+            next_sample_time += sample_duration;
             if buf.len() >= sam_num {
                 break;
             }
         }
+        if buf.len() < sam_num {
+            let next_sample: u64 = (next_sample_time - args.flag_startat)/sample_duration;
+            reader.seek(next_sample.try_into().unwrap()).unwrap();
 
-        let status = pcm.status().unwrap();
-        let htstamp = status.get_htstamp();
-        let delay = status.get_delay();
+            for sample in reader.samples::<i16>() {
+                buf.push(sample.unwrap());
+                if buf.len() >= sam_num {
+                    break;
+                }
+            }
 
-        let time = (htstamp.tv_sec as i64)*pow(10,9) + (delay as i64)*pow(10,9)/(fs as i64) + htstamp.tv_nsec as i64;
-
-        print!("Next sample {} will play at {}\r", sam_pushed, time);
-
+        }
         assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
-        sam_pushed += (buf.len()/num_channels) as i32;
 
         if first_time {
             first_time = false;
