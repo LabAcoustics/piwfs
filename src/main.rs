@@ -31,7 +31,7 @@ pub struct Args {
     pub flag_verbose: bool,
     pub flag_testfile: String,
     pub flag_time: u64,
-    pub flag_startat: u64,
+    pub flag_startat: f64,
     pub flag_no_resampling: bool,
     cmd_master: bool,
     cmd_slave: bool,

@@ -2,8 +2,6 @@ use alsa::{Direction, ValueOr};
 use alsa::pcm::{PCM, HwParams, Format, Access, State};
 use hound;
 
-use std::convert::TryInto;
-
 use num::pow;
 
 use super::Args;
@@ -36,24 +34,28 @@ pub fn main(args: Args) {
     let sam_num = period_size as usize * num_channels;
 
     let mut first_time = true;
-    let sample_duration = pow(10,9)/(fs as u64);
+    let sample_duration = pow(10.,9)/(fs as f64);
 
     loop {
         let status = pcm.status().unwrap();
         let htstamp = status.get_htstamp();
         let delay = status.get_delay();
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
-        let mut next_sample_time = (htstamp.tv_sec as u64)*pow(10,9) + (delay as u64 + 1)*sample_duration + htstamp.tv_nsec as u64;
+        let mut next_sample_time = (htstamp.tv_sec as f64)*pow(10.,9) + (delay as f64)*sample_duration + htstamp.tv_nsec as f64;
         while args.flag_startat > next_sample_time {
-            buf.push(0);
+            for _ in 0..num_channels { buf.push(0) }
             next_sample_time += sample_duration;
             if buf.len() >= sam_num {
                 break;
             }
         }
         if buf.len() < sam_num {
-            let next_sample: u64 = (next_sample_time - args.flag_startat)/sample_duration;
-            reader.seek(next_sample.try_into().unwrap()).unwrap();
+            let next_sample = ((next_sample_time - args.flag_startat)/sample_duration).round() as u32;
+            let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as u32;
+            //println!("Jumping {} samples!", next_sample as i64 - next_read as i64);
+            if next_sample != next_read {
+                reader.seek(next_sample as u32).unwrap();
+            }
 
             for sample in reader.samples::<i16>() {
                 buf.push(sample.unwrap());
