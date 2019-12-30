@@ -34,6 +34,8 @@ pub fn main(args: Args) {
     let sam_num = period_size as usize * num_channels;
 
     let mut first_time = true;
+    let mut jumps = 0;
+    let min_jumps = 20;
     let sample_duration = pow(10.,9)/(fs as f64);
 
     loop {
@@ -52,9 +54,14 @@ pub fn main(args: Args) {
         if buf.len() < sam_num {
             let next_sample = ((next_sample_time - args.flag_startat)/sample_duration).round() as u32;
             let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as u32;
-            //println!("Jumping {} samples!", next_sample as i64 - next_read as i64);
             if next_sample != next_read {
-                reader.seek(next_sample as u32).unwrap();
+                jumps += 1;
+                if jumps >= min_jumps{
+                    println!("Jumping {} samples!", next_sample as i64 - next_read as i64);
+                    reader.seek(next_sample as u32).unwrap();
+                }
+            } else {
+                jumps = 0;
             }
 
             for sample in reader.samples::<i16>() {
