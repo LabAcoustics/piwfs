@@ -58,7 +58,7 @@ pub fn main(args: Args) {
         if buf.len() < sam_num {
             let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
             let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
-            let jump = desync.next(next_sample - next_read).floor() as i64 - corrected_desync;
+            let jump = desync.next(corrected_desync as f64 + next_sample - next_read).floor() as i64 - corrected_desync;
             if jump != 0 {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
                 corrected_desync += jump;
