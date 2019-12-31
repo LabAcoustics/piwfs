@@ -44,7 +44,7 @@ pub fn main(args: Args) {
 
     loop {
         let status = pcm.status().unwrap();
-        let htstamp = status.get_htstamp();
+        let htstamp = status.get_driver_htstamp();
         let delay = status.get_delay();
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
         let mut next_sample_time = (htstamp.tv_sec as f64)*pow(10.,9) + (delay as f64)*sample_duration + htstamp.tv_nsec as f64;
