@@ -2,6 +2,9 @@ use alsa::{Direction, ValueOr};
 use alsa::pcm::{PCM, HwParams, Format, Access, State};
 use hound;
 
+use ta::indicators::SimpleMovingAverage;
+use ta::Next;
+
 use num::pow;
 
 use super::Args;
@@ -34,8 +37,9 @@ pub fn main(args: Args) {
     let sam_num = period_size as usize * num_channels;
 
     let mut first_time = true;
-    let mut jumps = 0;
-    let min_jumps = 20;
+    let mut corrected_desync = 0;
+    let mut desync = SimpleMovingAverage::new(1000).unwrap();
+
     let sample_duration = pow(10.,9)/(fs as f64);
 
     loop {
@@ -52,16 +56,13 @@ pub fn main(args: Args) {
             }
         }
         if buf.len() < sam_num {
-            let next_sample = ((next_sample_time - args.flag_startat)/sample_duration).round() as u32;
-            let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as u32;
-            if next_sample != next_read {
-                jumps += 1;
-                if jumps >= min_jumps{
-                    println!("Jumping {} samples!", next_sample as i64 - next_read as i64);
-                    reader.seek(next_sample as u32).unwrap();
-                }
-            } else {
-                jumps = 0;
+            let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
+            let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
+            let jump = desync.next(next_sample - next_read).floor() as i64 - corrected_desync;
+            if jump != 0 {
+                reader.seek((next_read as i64 + jump) as u32).unwrap();
+                corrected_desync += jump;
+                println!("Jumping {} samples!", jump);
             }
 
             for sample in reader.samples::<i16>() {
