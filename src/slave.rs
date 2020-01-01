@@ -9,8 +9,8 @@ use num::pow;
 
 use super::Args;
 
-fn floor_to_zero(n: f64) -> f64 {
-    return n.abs().floor()*n.signum()
+fn round_to_zero(n: f64, offset: f64) -> f64 {
+    return (n.abs() - offset).round()*n.signum()
 }
 
 pub fn main(args: Args) {
@@ -69,7 +69,7 @@ pub fn main(args: Args) {
             let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
             let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
             let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
-            let jump = floor_to_zero(cur_desync - corrected_desync as f64) as i64;
+            let jump = round_to_zero(cur_desync - corrected_desync as f64, 0.1) as i64;
             print!("Desync: {:.2}, Correction: {}, Delay: {}    \r", cur_desync, corrected_desync, delay);
             if jump != 0 {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
