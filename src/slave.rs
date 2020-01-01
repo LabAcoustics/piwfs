@@ -34,11 +34,12 @@ pub fn main(args: Args) {
     let swp = pcm.sw_params_current().unwrap();
     let period_size = hwp.get_period_size().unwrap();
     let buffer_size = hwp.get_buffer_size().unwrap();
-    swp.set_start_threshold(buffer_size).unwrap();
+    swp.set_start_threshold(period_size * num_channels as i32).unwrap();
     swp.set_tstamp_mode(true).unwrap();
     swp.set_tstamp_type().unwrap();
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
+    println!("Fs: {}, Channels: {}, Period: {}, Buffer: {}", fs, num_channels, period_size, buffer_size);
 
     let mut first_time = true;
     let mut corrected_desync = 0;
@@ -46,7 +47,12 @@ pub fn main(args: Args) {
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
+    let min_delay = 2*period_size;
+
     loop {
+        while pcm.avail_delay().unwrap().1 > min_delay {
+            std::thread::sleep(std::time::Duration::from_nanos(sample_duration as u64));
+        }
         let status = pcm.status().unwrap();
         let htstamp = status.get_driver_htstamp();
         let delay = status.get_delay();
@@ -64,7 +70,7 @@ pub fn main(args: Args) {
             let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
             let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
             let jump = floor_to_zero(cur_desync - corrected_desync as f64) as i64;
-            print!("Desync: {:.2}, Correction: {}    \r", cur_desync, corrected_desync);
+            print!("Desync: {:.2}, Correction: {}, Delay: {}    \r", cur_desync, corrected_desync, delay);
             if jump != 0 {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
                 corrected_desync += jump;
@@ -83,7 +89,6 @@ pub fn main(args: Args) {
         if first_time {
             first_time = false;
             assert_eq!(pcm.state(), State::Prepared);
-            pcm.start().unwrap();
         }
         if buf.len() == 0 { break; }
     }
