@@ -47,14 +47,14 @@ pub fn main(args: Args) {
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
-    let min_delay = 2*period_size;
+    let min_delay = period_size;
 
     loop {
         while pcm.avail_delay().unwrap().1 > min_delay {
             std::thread::sleep(std::time::Duration::from_nanos(sample_duration as u64));
         }
         let status = pcm.status().unwrap();
-        let htstamp = status.get_driver_htstamp();
+        let htstamp = status.get_htstamp();
         let delay = status.get_delay();
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num);
         let mut next_sample_time = (htstamp.tv_sec as f64)*pow(10.,9) + (delay as f64)*sample_duration + htstamp.tv_nsec as f64;
@@ -92,5 +92,6 @@ pub fn main(args: Args) {
         }
         if buf.len() == 0 { break; }
     }
+    println!("");
     pcm.drain().unwrap();
 }
