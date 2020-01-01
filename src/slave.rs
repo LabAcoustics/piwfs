@@ -9,6 +9,10 @@ use num::pow;
 
 use super::Args;
 
+fn floor_to_zero(n: f64) -> f64 {
+    return n.abs().floor()*n.signum()
+}
+
 pub fn main(args: Args) {
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
 
@@ -58,11 +62,12 @@ pub fn main(args: Args) {
         if buf.len() < sam_num {
             let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
             let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
-            let jump = desync.next(corrected_desync as f64 + next_sample - next_read).floor() as i64 - corrected_desync;
+            let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
+            let jump = floor_to_zero(cur_desync - corrected_desync as f64) as i64;
+            print!("Desync: {:.2}, Correction: {}    \r", cur_desync, corrected_desync);
             if jump != 0 {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
                 corrected_desync += jump;
-                println!("Jumping {} samples!", jump);
             }
 
             for sample in reader.samples::<i16>() {
