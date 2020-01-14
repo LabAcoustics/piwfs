@@ -87,6 +87,7 @@ pub fn main(args: Args) {
                     break;
                 }
             }
+            reader.seek((next_read as i64 + jump as i64 + (buf.len()/num_channels) as i64) as u32).unwrap();
 
         }
         assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
