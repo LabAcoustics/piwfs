@@ -34,7 +34,7 @@ pub fn main(args: Args) {
     let swp = pcm.sw_params_current().unwrap();
     let period_size = hwp.get_period_size().unwrap();
     let buffer_size = hwp.get_buffer_size().unwrap();
-    swp.set_start_threshold(period_size * num_channels as i32).unwrap();
+    swp.set_start_threshold((period_size as i32 * num_channels as i32).into()).unwrap();
     swp.set_tstamp_mode(true).unwrap();
     swp.set_tstamp_type().unwrap();
     pcm.sw_params(&swp).unwrap();
@@ -69,15 +69,20 @@ pub fn main(args: Args) {
             let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
             let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
             let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
-            let jump = round_to_zero(cur_desync - corrected_desync as f64, 0.1) as i64;
+            let jump = (cur_desync - corrected_desync as f64).floor() as i64;
             print!("Desync: {:.2}, Correction: {}, Delay: {}    \r", cur_desync, corrected_desync, delay);
             if jump != 0 {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
                 corrected_desync += jump;
             }
 
+            let mut prev_sample = reader.samples::<i16>().next().unwrap().unwrap();
+            let ratio = cur_desync - corrected_desync as f64;
+
             for sample in reader.samples::<i16>() {
-                buf.push(sample.unwrap());
+                let cur_sample = sample.unwrap();
+                buf.push(((prev_sample as f64)*(1.-ratio) + cur_sample as f64*ratio) as i16);
+                prev_sample = cur_sample;
                 if buf.len() >= sam_num {
                     break;
                 }

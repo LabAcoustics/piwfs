@@ -16,6 +16,7 @@ hound = "3.4"
 samplerate = "0.2.1"
 thread-priority = "0.1"
 nix = "0.15"
+itertools = "0.7"
 alsa = { path = "./alsa-rs" }
 
 [workspace]
