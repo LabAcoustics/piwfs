@@ -47,7 +47,7 @@ pub fn main(args: Args) {
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
-    let min_delay = period_size;
+    let min_delay = period_size * 2;
 
     loop {
         while pcm.avail_delay().unwrap().1 > min_delay {
@@ -70,19 +70,30 @@ pub fn main(args: Args) {
             let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
             let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
             let jump = (cur_desync - corrected_desync as f64).floor() as i64;
-            print!("Desync: {:.2}, Correction: {}, Delay: {}    \r", cur_desync, corrected_desync, delay);
             if jump != 0 {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
                 corrected_desync += jump;
             }
 
-            let mut prev_sample = reader.samples::<i16>().next().unwrap().unwrap();
-            let ratio = cur_desync - corrected_desync as f64;
+            let mut prev_samples = Vec::with_capacity(num_channels);
 
+            for _ in 0..num_channels {
+                let mut samples = reader.samples::<i16>();
+                prev_samples.push(samples.next().unwrap().unwrap());
+            }
+
+            let ratio = cur_desync - corrected_desync as f64;
+            print!("Desync: {:.2}, Correction: {}, Ratio: {:.2}, Delay: {}    \r", cur_desync, corrected_desync, ratio, delay);
+            let mut cur_channel = 0;
             for sample in reader.samples::<i16>() {
-                let cur_sample = sample.unwrap();
-                buf.push(((prev_sample as f64)*(1.-ratio) + cur_sample as f64*ratio) as i16);
-                prev_sample = cur_sample;
+                let cur_sample = match sample {
+                    Ok(res) => res,
+                    Err(_) => break
+                };
+                let inter_sample = ((prev_samples[cur_channel] as f64)*(1.-ratio) + cur_sample as f64*ratio) as i16;
+                buf.push(inter_sample);
+                prev_samples[cur_channel] = cur_sample;
+                cur_channel = (cur_channel + 1) % num_channels;
                 if buf.len() >= sam_num {
                     break;
                 }
