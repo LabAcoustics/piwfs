@@ -6,11 +6,13 @@ use ta::indicators::SimpleMovingAverage;
 use ta::Next;
 
 use num::pow;
+use std::f64::consts::PI;
 
 use super::Args;
 
-fn round_to_zero(n: f64, offset: f64) -> f64 {
-    return (n.abs() - offset).round()*n.signum()
+fn sinc_interpolate(a: i16, b: i16, ratio: f64) -> i16 {
+    let interp = (a as f64)*(PI*ratio).sin()/(PI*ratio) + (b as f64)*(PI*(ratio-1.)).sin()/(PI*(ratio-1.));
+    return (std::i16::MIN as f64).max((std::i16::MAX as f64).min(interp)) as i16;
 }
 
 pub fn main(args: Args) {
@@ -90,7 +92,7 @@ pub fn main(args: Args) {
                     Ok(res) => res,
                     Err(_) => break
                 };
-                let inter_sample = ((prev_samples[cur_channel] as f64)*(1.-ratio) + cur_sample as f64*ratio) as i16;
+                let inter_sample = sinc_interpolate(prev_samples[cur_channel], cur_sample, ratio);
                 buf.push(inter_sample);
                 prev_samples[cur_channel] = cur_sample;
                 cur_channel = (cur_channel + 1) % num_channels;
