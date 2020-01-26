@@ -49,7 +49,7 @@ pub fn main(args: Args) {
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
-    let min_delay = period_size * 2;
+    let min_delay = period_size;
 
     loop {
         while pcm.avail_delay().unwrap().1 > min_delay {
