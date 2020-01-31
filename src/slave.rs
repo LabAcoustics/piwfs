@@ -8,6 +8,8 @@ use ta::Next;
 use num::pow;
 use std::f64::consts::PI;
 
+use libc;
+
 use super::Args;
 
 fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize) -> Vec<i16> {
@@ -62,8 +64,10 @@ pub fn main(args: Args) {
     let sample_duration = pow(10.,9)/(fs as f64);
 
     loop {
-        while pcm.avail_delay().unwrap().1 > buffer_fill.into() {
-            std::thread::sleep(std::time::Duration::from_nanos(sample_duration as u64));
+        if pcm.state() == State::Running {
+            while pcm.avail_delay().unwrap().1 > buffer_fill.into() {
+                std::thread::sleep(std::time::Duration::from_nanos(sample_duration as u64));
+            }
         }
         let status = pcm.status().unwrap();
         let htstamp = status.get_driver_htstamp();
@@ -97,19 +101,25 @@ pub fn main(args: Args) {
                 }
             }
 
+            let ratio = cur_desync - corrected_desync as f64;
+            print!("Desync: {:.2}, Correction: {},  Delay: {}    \r", cur_desync, corrected_desync, delay);
+            buf = sinc_move_inter(&buf, ratio, 3, num_channels);
             reader.seek((next_read as i64 + jump as i64 + (buf.len()/num_channels) as i64) as u32).unwrap();
 
-            let ratio = cur_desync - corrected_desync as f64;
-            print!("Desync: {:.2}, Correction: {}, Ratio: {:.2}, Delay: {}    \r", cur_desync, corrected_desync, ratio, delay);
-            buf = sinc_move_inter(&buf, ratio, 3, num_channels);
-
         }
-        assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
 
-        if first_time {
-            first_time = false;
-            assert_eq!(pcm.state(), State::Prepared);
+        match io.writei(&buf) {
+            Ok(num) => assert_eq!(num, buf.len()/num_channels),
+            Err(err) => if err == alsa::Error::new("snd_pcm_writei", libc::EPIPE) {
+                println!("ERR: Underflow detected!");
+                pcm.prepare().unwrap();
+            } else {
+                panic!(err);
+            }
         }
+
+        if first_time { first_time = false; }
+
         if buf.len() == 0 { break; }
     }
     println!("");

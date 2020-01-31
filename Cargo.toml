@@ -5,18 +5,13 @@ authors = ["Ashymad <szymon.mikulicz@posteo.net>"]
 edition = "2018"
 
 [dependencies]
-rppal = "0.11"
 docopt = "1"
 serde = "1.0"
 serde_derive = "1.0"
 num = "0.2"
-mio = "0.6"
 ta = "0.1"
 hound = "3.4"
-samplerate = "0.2.1"
-thread-priority = "0.1"
-nix = "0.15"
-itertools = "0.7"
+libc = "0.2"
 alsa = { path = "./alsa-rs" }
 
 [workspace]
