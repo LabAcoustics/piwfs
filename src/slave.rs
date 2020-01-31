@@ -10,15 +10,18 @@ use std::f64::consts::PI;
 
 use super::Args;
 
-fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize) -> Vec<i16> {
-    let mut out = Vec::with_capacity(buf.len() - 1);
-    for out_it in 0..(buf.len() - 1) {
-        let mut interp = 0.;
-        for in_it in out_it.saturating_sub(size + 1)..buf.len().min(out_it + size) {
-            let cur_r = PI*(ratio + out_it as f64 - in_it as f64);
-            interp += (buf[in_it] as f64)*cur_r.sin()/cur_r;
+fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize) -> Vec<i16> {
+    let mut out = vec![0; buf.len() - num_channels];
+    for channel in 0..num_channels {
+        for out_it in (channel..(buf.len() - num_channels)).step_by(num_channels) {
+            let mut interp = 0.;
+            for in_it in (channel + out_it.saturating_sub((size + 1)*num_channels)..buf.len().min(out_it + size*num_channels)).step_by(num_channels) {
+                let cur_r = PI*(ratio + (out_it/num_channels) as f64 - (in_it/num_channels) as f64);
+                interp += (buf[in_it] as f64)*cur_r.sin()/cur_r;
+            }
+            assert_eq!(out[out_it], 0);
+            out[out_it] = (std::i16::MIN as f64).max((std::i16::MAX as f64).min(interp)) as i16;
         }
-        out.push((std::i16::MIN as f64).max((std::i16::MAX as f64).min(interp)) as i16);
     }
     return out;
 }
@@ -98,7 +101,7 @@ pub fn main(args: Args) {
 
             let ratio = cur_desync - corrected_desync as f64;
             print!("Desync: {:.2}, Correction: {}, Ratio: {:.2}, Delay: {}    \r", cur_desync, corrected_desync, ratio, delay);
-            buf = sinc_move_inter(&buf, ratio, 3);
+            buf = sinc_move_inter(&buf, ratio, 3, num_channels);
 
         }
         assert_eq!(io.writei(&buf).unwrap(), buf.len()/num_channels);
