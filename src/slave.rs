@@ -66,6 +66,7 @@ pub fn main(args: Args) {
 
     let mut last_status = pcm.status().unwrap();
     let mut last_samples_pushed = 0.;
+    let mut real_sample_duration_avg = SimpleMovingAverage::new(100).unwrap();
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
@@ -78,13 +79,13 @@ pub fn main(args: Args) {
         let status = pcm.status().unwrap();
         let htstamp = status.get_driver_htstamp();
         let delay = status.get_delay();
-        let real_sample_duration = if pcm.state() == State::Running {
+        let real_sample_duration = real_sample_duration_avg.next(if pcm.state() == State::Running {
             let samples_played = last_status.get_delay() as f64 + last_samples_pushed - delay as f64;
             let time_played = timespec_to_ns(htstamp) - timespec_to_ns(last_status.get_driver_htstamp());
             time_played/samples_played
         } else {
             sample_duration
-        };
+        });
         last_status = status;
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num + 1);
         let mut next_sample_time = timespec_to_ns(htstamp) + (delay as f64)*real_sample_duration;
