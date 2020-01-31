@@ -28,6 +28,10 @@ fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize)
     return out;
 }
 
+fn timespec_to_ns(tstamp: libc::timespec) -> f64 {
+    return (tstamp.tv_sec as f64) * pow(10.,9) + (tstamp.tv_nsec as f64);
+}
+
 pub fn main(args: Args) {
     let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
 
@@ -57,9 +61,11 @@ pub fn main(args: Args) {
     let sam_num = period_size as usize * num_channels;
     println!("Fs: {}, Channels: {}, Period: {}, Buffer: {}", fs, num_channels, period_size, buffer_size);
 
-    let mut first_time = true;
     let mut corrected_desync = 0;
     let mut desync = SimpleMovingAverage::new(1000).unwrap();
+
+    let mut last_status = pcm.status().unwrap();
+    let mut last_samples_pushed = 0.;
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
@@ -72,8 +78,16 @@ pub fn main(args: Args) {
         let status = pcm.status().unwrap();
         let htstamp = status.get_driver_htstamp();
         let delay = status.get_delay();
+        let real_sample_duration = if pcm.state() == State::Running {
+            let samples_played = last_status.get_delay() as f64 + last_samples_pushed - delay as f64;
+            let time_played = timespec_to_ns(htstamp) - timespec_to_ns(last_status.get_driver_htstamp());
+            time_played/samples_played
+        } else {
+            sample_duration
+        };
+        last_status = status;
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num + 1);
-        let mut next_sample_time = (htstamp.tv_sec as f64)*pow(10.,9) + (delay as f64)*sample_duration + htstamp.tv_nsec as f64;
+        let mut next_sample_time = timespec_to_ns(htstamp) + (delay as f64)*real_sample_duration;
         while args.flag_startat > next_sample_time {
             for _ in 0..num_channels { buf.push(0) }
             next_sample_time += sample_duration;
@@ -109,16 +123,14 @@ pub fn main(args: Args) {
         }
 
         match io.writei(&buf) {
-            Ok(num) => assert_eq!(num, buf.len()/num_channels),
+            Ok(num) => last_samples_pushed = num as f64,
             Err(err) => if err == alsa::Error::new("snd_pcm_writei", libc::EPIPE) {
-                println!("ERR: Underflow detected!");
+                println!("\nERR: Underflow detected!");
                 pcm.prepare().unwrap();
             } else {
                 panic!(err);
             }
         }
-
-        if first_time { first_time = false; }
 
         if buf.len() == 0 { break; }
     }
