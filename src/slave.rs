@@ -53,7 +53,7 @@ pub fn main(args: Args) {
     let swp = pcm.sw_params_current().unwrap();
     let period_size = hwp.get_period_size().unwrap();
     let buffer_size = hwp.get_buffer_size().unwrap();
-    let buffer_fill =  period_size as i32 * num_channels as i32;
+    let buffer_fill = 2 * period_size as i32 * num_channels as i32;
     swp.set_start_threshold(buffer_fill.into()).unwrap();
     swp.set_tstamp_mode(true).unwrap();
     swp.set_tstamp_type().unwrap();
@@ -66,7 +66,7 @@ pub fn main(args: Args) {
 
     let mut last_status = pcm.status().unwrap();
     let mut last_samples_pushed = 0.;
-    let mut real_sample_duration_avg = SimpleMovingAverage::new(100).unwrap();
+    let mut real_sample_duration_avg = SimpleMovingAverage::new(1000).unwrap();
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
