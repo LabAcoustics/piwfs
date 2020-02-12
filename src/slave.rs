@@ -122,9 +122,10 @@ pub fn main(args: Args) {
         let cur_desync = if buf.len() < sam_num {
             let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
             let jump = (cur_desync - corrected_desync as f64).floor() as i64;
+            let jumpto = next_read as i64 - sinc_overlap as i64 + 1 + jump;
 
-            if jump != 0 && next_read > -(jump as f64) {
-                reader.seek((next_read as i64 + jump) as u32).unwrap();
+            if jump != 0 && jumpto >= 0 {
+                reader.seek(jumpto as u32).unwrap();
                 corrected_desync += jump;
             }
 
