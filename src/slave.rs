@@ -17,12 +17,13 @@ use libc;
 use super::Args;
 
 fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize) -> Vec<i16> {
-    let mut out = vec![0; buf.len() - num_channels];
+    let out_size = buf.len() - (2*size - 1)*num_channels;
+    let mut out = vec![0; out_size];
     for channel in 0..num_channels {
-        for out_it in (channel..(buf.len() - num_channels)).step_by(num_channels) {
+        for out_it in (channel..out_size).step_by(num_channels) {
             let mut interp = 0.;
-            for in_it in (channel + out_it.saturating_sub((size + 1)*num_channels)..buf.len().min(out_it + size*num_channels)).step_by(num_channels) {
-                let cur_r = PI*(ratio + (out_it/num_channels) as f64 - (in_it/num_channels) as f64);
+            for in_it in ((channel + out_it)..(out_it + (2*size-1)*num_channels)).step_by(num_channels) {
+                let cur_r = PI*(ratio + (out_it/num_channels + size - 1) as f64 - (in_it/num_channels) as f64);
                 interp += (buf[in_it] as f64)*cur_r.sin()/cur_r;
             }
             assert_eq!(out[out_it], 0);
@@ -63,6 +64,8 @@ pub fn main(args: Args) {
     swp.set_tstamp_type().unwrap();
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
+    let sinc_overlap = 3;
+    let sam_num_over = sam_num + (2*sinc_overlap - 1)*num_channels;
     print!("Fs: {}, Channels: {}, Period: {}, Buffer: {}", fs, num_channels, period_size, buffer_size);
     println!("[?25l");
     let mut corrected_desync = 0;
@@ -73,6 +76,7 @@ pub fn main(args: Args) {
     let mut real_sample_duration_avg = SimpleMovingAverage::new(1000).unwrap();
 
     let sample_duration = pow(10.,9)/(fs as f64);
+
 
     let running = Arc::new(AtomicBool::new(true));
     {
@@ -101,7 +105,7 @@ pub fn main(args: Args) {
             sample_duration
         });
         last_status = status;
-        let mut buf: Vec<i16> = Vec::with_capacity(sam_num + 1);
+        let mut buf: Vec<i16> = Vec::with_capacity(sam_num_over);
         let mut next_sample_time = timespec_to_ns(htstamp) + (delay as f64)*real_sample_duration;
 
         while args.flag_startat > next_sample_time {
@@ -113,13 +117,13 @@ pub fn main(args: Args) {
         }
 
         let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
-        let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
+        let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64 + sinc_overlap as f64 - 1.;
 
         let cur_desync = if buf.len() < sam_num {
             let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
             let jump = (cur_desync - corrected_desync as f64).floor() as i64;
 
-            if jump != 0 {
+            if jump != 0 && next_read > -(jump as f64) {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
                 corrected_desync += jump;
             }
@@ -130,14 +134,14 @@ pub fn main(args: Args) {
                     Ok(res) => res,
                     Err(_) => break
                 });
-                if buf.len() > sam_num {
+                if buf.len() > sam_num_over {
                     break;
                 }
             }
 
             let ratio = cur_desync - corrected_desync as f64;
-            buf = sinc_move_inter(&buf, ratio, 3, num_channels);
-            reader.seek((next_read as i64 + jump as i64 + (buf.len()/num_channels) as i64) as u32).unwrap();
+            buf = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
+            reader.seek((next_read as i64 + jump as i64 + (buf.len()/num_channels) as i64 - sinc_overlap as i64 + 1) as u32).unwrap();
             cur_desync
         } else {
             next_sample
