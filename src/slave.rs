@@ -5,6 +5,10 @@ use hound;
 use ta::indicators::SimpleMovingAverage;
 use ta::Next;
 
+use ctrlc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use num::pow;
 use std::f64::consts::PI;
 
@@ -59,8 +63,8 @@ pub fn main(args: Args) {
     swp.set_tstamp_type().unwrap();
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
-    println!("Fs: {}, Channels: {}, Period: {}, Buffer: {}", fs, num_channels, period_size, buffer_size);
-
+    print!("Fs: {}, Channels: {}, Period: {}, Buffer: {}", fs, num_channels, period_size, buffer_size);
+    println!("[?25l");
     let mut corrected_desync = 0;
     let mut desync = SimpleMovingAverage::new(1000).unwrap();
 
@@ -70,17 +74,27 @@ pub fn main(args: Args) {
 
     let sample_duration = pow(10.,9)/(fs as f64);
 
-    loop {
+    let running = Arc::new(AtomicBool::new(true));
+    {
+        let r = running.clone();
+        ctrlc::set_handler(move || {
+            r.store(false, Ordering::SeqCst);
+        }).expect("Error setting Ctrl-C handler");
+    }
+
+   while running.load(Ordering::SeqCst) {
+
         if pcm.state() == State::Running {
             while pcm.avail_delay().unwrap().1 > buffer_fill.into() {
                 std::thread::sleep(std::time::Duration::from_nanos(sample_duration as u64));
             }
         }
+
         let status = pcm.status().unwrap();
         let htstamp = status.get_driver_htstamp();
         let delay = status.get_delay();
-        let real_sample_duration = real_sample_duration_avg.next(if pcm.state() == State::Running {
-            let samples_played = last_status.get_delay() as f64 + last_samples_pushed - delay as f64;
+        let samples_played = last_status.get_delay() as f64 + last_samples_pushed - delay as f64;
+        let real_sample_duration = real_sample_duration_avg.next(if samples_played > 0. {
             let time_played = timespec_to_ns(htstamp) - timespec_to_ns(last_status.get_driver_htstamp());
             time_played/samples_played
         } else {
@@ -89,6 +103,7 @@ pub fn main(args: Args) {
         last_status = status;
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num + 1);
         let mut next_sample_time = timespec_to_ns(htstamp) + (delay as f64)*real_sample_duration;
+
         while args.flag_startat > next_sample_time {
             for _ in 0..num_channels { buf.push(0) }
             next_sample_time += real_sample_duration;
@@ -96,15 +111,19 @@ pub fn main(args: Args) {
                 break;
             }
         }
-        if buf.len() < sam_num {
-            let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
-            let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
+
+        let next_sample = (next_sample_time - args.flag_startat)/sample_duration as f64;
+        let next_read = ((reader.len() as usize - reader.samples::<i16>().len())/num_channels) as f64;
+
+        let cur_desync = if buf.len() < sam_num {
             let cur_desync = desync.next(corrected_desync as f64 + next_sample - next_read);
             let jump = (cur_desync - corrected_desync as f64).floor() as i64;
+
             if jump != 0 {
                 reader.seek((next_read as i64 + jump) as u32).unwrap();
                 corrected_desync += jump;
             }
+
 
             for sample in reader.samples::<i16>() {
                 buf.push(match sample {
@@ -117,11 +136,14 @@ pub fn main(args: Args) {
             }
 
             let ratio = cur_desync - corrected_desync as f64;
-            print!("Desync: {:.2}, Correction: {},  Delay: {}    \r", cur_desync, corrected_desync, delay);
             buf = sinc_move_inter(&buf, ratio, 3, num_channels);
             reader.seek((next_read as i64 + jump as i64 + (buf.len()/num_channels) as i64) as u32).unwrap();
+            cur_desync
+        } else {
+            next_sample
+        };
 
-        }
+        print!("Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:.2}%      \r", cur_desync, corrected_desync, delay, 100.*(real_sample_duration/sample_duration));
 
         match io.writei(&buf) {
             Ok(num) => last_samples_pushed = num as f64,
@@ -135,6 +157,6 @@ pub fn main(args: Args) {
 
         if buf.len() == 0 { break; }
     }
-    println!("");
+    println!("[?25h");
     pcm.drain().unwrap();
 }

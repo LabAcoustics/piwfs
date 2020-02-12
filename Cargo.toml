@@ -11,6 +11,7 @@ serde_derive = "1.0"
 num = "0.2"
 ta = "0.1"
 hound = "3.4"
+ctrlc = "3"
 libc = "0.2"
 alsa = { path = "./alsa-rs" }
 
