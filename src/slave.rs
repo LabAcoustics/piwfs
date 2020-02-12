@@ -91,7 +91,7 @@ pub fn main(args: Args) {
         let mut next_sample_time = timespec_to_ns(htstamp) + (delay as f64)*real_sample_duration;
         while args.flag_startat > next_sample_time {
             for _ in 0..num_channels { buf.push(0) }
-            next_sample_time += sample_duration;
+            next_sample_time += real_sample_duration;
             if buf.len() >= sam_num {
                 break;
             }
