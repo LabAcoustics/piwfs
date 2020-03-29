@@ -11,7 +11,7 @@ Raspberry Pi Wave Field Synthesis System
 
 Usage:
   piwfs master
-  piwfs slave [--device=<dev>] [--verbose] [--testfile=<testf>] [--startat=<time>] [--no-resampling]
+  piwfs slave [--device=<dev>] [--verbose] [--testfile=<testf>] [--startat=<time>] [--no-correction]
   piwfs (-h | --help) 
 
 Options:
