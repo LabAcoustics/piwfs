@@ -64,7 +64,7 @@ pub fn main(args: Args) {
     swp.set_tstamp_type().unwrap();
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
-    let sinc_overlap = 3;
+    let sinc_overlap = if !args.flag_no_correction { 3 } else { 0 };
     let sam_num_over = sam_num + (2*sinc_overlap - 1)*num_channels;
     print!("Fs: {}, Channels: {}, Period: {}, Buffer: {}", fs, num_channels, period_size, buffer_size);
     println!("[?25l");
@@ -124,11 +124,10 @@ pub fn main(args: Args) {
             let jump = (cur_desync - corrected_desync as f64).floor() as i64;
             let jumpto = next_read as i64 - sinc_overlap as i64 + 1 + jump;
 
-            if jump != 0 && jumpto >= 0 {
+            if !args.flag_no_correction && jump != 0 && jumpto >= 0 {
                 reader.seek(jumpto as u32).unwrap();
                 corrected_desync += jump;
             }
-
 
             for sample in reader.samples::<i16>() {
                 buf.push(match sample {
@@ -141,8 +140,11 @@ pub fn main(args: Args) {
             }
 
             let ratio = cur_desync - corrected_desync as f64;
-            buf = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
-            reader.seek((next_read as i64 + jump as i64 + (buf.len()/num_channels) as i64 - sinc_overlap as i64 + 1) as u32).unwrap();
+            buf = if !args.flag_no_correction {
+                let b = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
+                reader.seek((next_read as i64 + jump as i64 + (buf.len()/num_channels) as i64 - sinc_overlap as i64 + 1) as u32).unwrap();
+                b
+            } else { buf };
             cur_desync
         } else {
             next_sample

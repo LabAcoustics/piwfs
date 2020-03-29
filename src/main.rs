@@ -11,7 +11,7 @@ Raspberry Pi Wave Field Synthesis System
 
 Usage:
   piwfs master
-  piwfs slave [--device=<dev>] [--verbose] [--testfile=<testf>] [--startat=<time>]
+  piwfs slave [--device=<dev>] [--verbose] [--testfile=<testf>] [--startat=<time>] [--no-resampling]
   piwfs (-h | --help) 
 
 Options:
@@ -20,6 +20,7 @@ Options:
   --verbose           Print messages while working
   --testfile=<testf>  Load a test file to play [default: test.wav]
   --startat=<time>    Start playing at systime
+  --no-correction     Disable desync correction
 ";
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +29,7 @@ pub struct Args {
     pub flag_verbose: bool,
     pub flag_testfile: String,
     pub flag_startat: f64,
+    pub flag_no_correction: bool,
     cmd_master: bool,
     cmd_slave: bool,
 }
