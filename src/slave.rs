@@ -187,11 +187,13 @@ pub fn main(args: Args) {
         };
 
         print!(
-            "Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:.2}%      \r",
+            "Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:+.3}%  Next sample at: {}  (mean of {})    \r",
             cur_desync,
             corrected_desync,
             delays.last().unwrap(),
-            100. * (real_sample_duration / sample_duration)
+            100. * (real_sample_duration / sample_duration - 1.),
+            next_sample_time,
+            delays.len()
         );
 
         match io.writei(&buf) {
