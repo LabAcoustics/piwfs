@@ -125,7 +125,7 @@ pub fn main(args: &ArgMatches) {
         }
 
         let real_sample_duration = real_sample_duration_avg.next(
-            if pcm.state() == State::Running && last_delay > 0. && last_samples_pushed > 0. {
+            if !args.is_present("no-estimation") && pcm.state() == State::Running && last_delay > 0. && last_samples_pushed > 0. {
                 let mut skipped = 0;
                 stamps
                     .iter()

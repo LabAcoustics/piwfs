@@ -49,6 +49,11 @@ fn main() {
                     Arg::with_name("no-correction")
                         .long("no-correction")
                         .help("Disables resampling"),
+                )
+                .arg(
+                    Arg::with_name("no-estimation")
+                        .long("no-estimation")
+                        .help("Disables sample length estimation"),
                 ),
         )
         .get_matches();
