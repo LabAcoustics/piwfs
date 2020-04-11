@@ -1,5 +1,5 @@
-use super::Args;
+use clap::ArgMatches;
 
-pub fn main(args: Args) {
+pub fn main(args: &ArgMatches) {
     return;
 }

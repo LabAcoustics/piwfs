@@ -9,12 +9,11 @@ use ctrlc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use num::pow;
 use std::f64::consts::PI;
 
 use libc;
 
-use super::Args;
+use clap::ArgMatches;
 
 fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize) -> Vec<i16> {
     let out_size = buf.len() - (2 * size - 1) * num_channels;
@@ -38,13 +37,24 @@ fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize)
 }
 
 fn timespec_to_ns(tstamp: libc::timespec) -> f64 {
-    return (tstamp.tv_sec as f64) * pow(10., 9) + (tstamp.tv_nsec as f64);
+    return (tstamp.tv_sec as f64) * 10f64.powi(9) + (tstamp.tv_nsec as f64);
 }
 
-pub fn main(args: Args) {
-    let pcm = PCM::new(&args.flag_device, Direction::Playback, false).unwrap();
+pub fn main(args: &ArgMatches) {
+    let pcm = PCM::new(
+        &args.value_of("device").unwrap_or("hw:0"),
+        Direction::Playback,
+        false,
+    )
+    .unwrap();
+    let mut reader = hound::WavReader::open(args.value_of("testfile").unwrap()).unwrap();
+    let is_correction = !args.is_present("no-correction");
+    let startstamp = args
+        .value_of("startat")
+        .unwrap()
+        .parse::<f64>()
+        .expect("[ERR] Couldn't parse startat as floating point number");
 
-    let mut reader = hound::WavReader::open(args.flag_testfile).unwrap();
     let reader_spec = reader.spec();
 
     let fs = reader_spec.sample_rate;
@@ -68,17 +78,22 @@ pub fn main(args: Args) {
     swp.set_tstamp_type().unwrap();
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
-    let sinc_overlap = if !args.flag_no_correction { 3 } else { 0 };
+    let sinc_overlap = if is_correction {
+        3
+    } else {
+        println!("[WRN] Correction disabled");
+        0
+    };
     let sam_num_over = sam_num + (2 * sinc_overlap - 1) * num_channels;
     print!(
-        "Fs: {}, Channels: {}, Period: {}, Buffer: {}",
+        "[INF] Fs: {}, Channels: {}, Period: {}, Buffer: {}",
         fs, num_channels, period_size, buffer_size
     );
     println!("[?25l");
     let mut corrected_desync = 0;
     let mut desync = SimpleMovingAverage::new(1000).unwrap();
 
-    let sample_duration = pow(10., 9) / (fs as f64);
+    let sample_duration = 10f64.powi(9) / (fs as f64);
 
     let mut last_samples_pushed = 0.;
     let mut last_delay = 0.;
@@ -91,7 +106,7 @@ pub fn main(args: Args) {
         ctrlc::set_handler(move || {
             r.store(false, Ordering::SeqCst);
         })
-        .expect("Error setting Ctrl-C handler");
+        .expect("[ERR] Error setting Ctrl-C handler");
     }
 
     while running.load(Ordering::SeqCst) {
@@ -120,12 +135,15 @@ pub fn main(args: Args) {
                     .fold(0., |acc, (stamp, delay)| {
                         let mtime =
                             (stamp - last_stamp) / (last_delay + last_samples_pushed - delay);
-                        //println!("DBG: s = {}, ls = {}, d = {}, ld = {}, lsp = {}, t = {}", stamp, last_stamp, delay, last_delay, last_samples_pushed, mtime);
+                        //println!("[DBG] s = {}, ls = {}, d = {}, ld = {}, lsp = {}, t = {}", stamp, last_stamp, delay, last_delay, last_samples_pushed, mtime);
                         acc + if last_samples_pushed == *delay {
                             skipped += 1;
                             0.
                         } else {
-                            assert!(mtime > 0., format!("ERR: Mean sample time less than zero!"));
+                            assert!(
+                                mtime > 0.,
+                                format!("[ERR] Mean sample time less than zero!")
+                            );
                             mtime
                         }
                     })
@@ -144,7 +162,7 @@ pub fn main(args: Args) {
             })
             / (stamps.len() as f64);
 
-        while args.flag_startat > next_sample_time {
+        while startstamp > next_sample_time {
             for _ in 0..num_channels {
                 buf.push(0)
             }
@@ -154,7 +172,7 @@ pub fn main(args: Args) {
             }
         }
 
-        let next_sample = (next_sample_time - args.flag_startat) / sample_duration as f64;
+        let next_sample = (next_sample_time - startstamp) / sample_duration as f64;
         let next_read = ((reader.len() as usize - reader.samples::<i16>().len()) / num_channels)
             as f64
             + sinc_overlap as f64
@@ -165,7 +183,7 @@ pub fn main(args: Args) {
             let jump = (cur_desync - corrected_desync as f64).floor() as i64;
             let jumpto = next_read as i64 - sinc_overlap as i64 + 1 + jump;
 
-            if !args.flag_no_correction && jump != 0 && jumpto >= 0 {
+            if is_correction && jump != 0 && jumpto >= 0 {
                 reader.seek(jumpto as u32).unwrap();
                 corrected_desync += jump;
             }
@@ -181,8 +199,8 @@ pub fn main(args: Args) {
             }
 
             let ratio = cur_desync - corrected_desync as f64;
-            buf = if !args.flag_no_correction {
-                let b = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
+            if is_correction {
+                buf = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
                 reader
                     .seek(
                         (next_read as i64 + jump as i64 + (buf.len() / num_channels) as i64
@@ -190,17 +208,14 @@ pub fn main(args: Args) {
                             + 1) as u32,
                     )
                     .unwrap();
-                b
-            } else {
-                buf
-            };
+            }
             cur_desync
         } else {
             next_sample
         };
 
         print!(
-            "Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:+.3}%  Mean: {}    \r",
+            "[INF] Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:+.3}%  Mean: {}    \r",
             cur_desync,
             corrected_desync,
             delays.last().unwrap(),
@@ -222,7 +237,7 @@ pub fn main(args: Args) {
             }
             Err(err) => {
                 if err == alsa::Error::new("snd_pcm_writei", libc::EPIPE) {
-                    println!("\nERR: Underflow detected!");
+                    println!("\n[ERR] Underflow detected!");
                     pcm.prepare().unwrap();
                     last_samples_pushed = 0.;
                 } else {
