@@ -94,6 +94,7 @@ pub fn main(args: &ArgMatches) {
     let mut desync = SimpleMovingAverage::new(1000).unwrap();
 
     let sample_duration = 10f64.powi(9) / (fs as f64);
+    let mut real_sample_duration = sample_duration;
 
     let mut last_samples_pushed = 0.;
     let mut last_delay = 0.;
@@ -124,7 +125,7 @@ pub fn main(args: &ArgMatches) {
             }
         }
 
-        let real_sample_duration = real_sample_duration_avg.next(
+        real_sample_duration = real_sample_duration_avg.next(
             if !args.is_present("no-estimation") && pcm.state() == State::Running && last_delay > 0. && last_samples_pushed > 0. {
                 let mut skipped = 0;
                 stamps
@@ -147,7 +148,7 @@ pub fn main(args: &ArgMatches) {
                     })
                     / (stamps.len() - skipped) as f64
             } else {
-                sample_duration
+                real_sample_duration
             },
         );
 
