@@ -119,9 +119,7 @@ pub fn main(args: &ArgMatches) {
             let delay = status.get_delay() as f64;
             delays.push(delay);
 
-            if status.get_state() == State::Running && delay > buffer_fill.into() {
-                std::thread::sleep(std::time::Duration::from_nanos(sample_duration as u64));
-            } else {
+            if status.get_state() != State::Running || delay < buffer_fill.into() {
                 break;
             }
         }
@@ -215,7 +213,7 @@ pub fn main(args: &ArgMatches) {
         };
 
         print!(
-            "[INF] Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:+.3}%  Mean: {}    \r",
+            "[INF] Desync: {:.2}, Correction: {}, Delay: {}, Freq: {:+.3}%, Spins: {}    \r",
             cur_desync,
             corrected_desync,
             delays.last().unwrap(),
