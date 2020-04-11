@@ -53,8 +53,12 @@ pub fn main(args: &ArgMatches) {
         .value_of("startat")
         .unwrap()
         .parse::<f64>()
-        .expect("[ERR] Couldn't parse startat as floating point number");
-
+        .expect("[ERR] Couldn't parse startat as a floating point number");
+    let avg_size = args
+        .value_of("average")
+        .unwrap_or("1000")
+        .parse::<u32>()
+        .expect("[ERR] Couldn't parse average as an unsigned integer");
     let reader_spec = reader.spec();
 
     let fs = reader_spec.sample_rate;
@@ -79,9 +83,11 @@ pub fn main(args: &ArgMatches) {
     pcm.sw_params(&swp).unwrap();
     let sam_num = period_size as usize * num_channels;
     let sinc_overlap = if is_correction {
-        3
+        args.value_of("quality")
+            .unwrap_or("3")
+            .parse::<usize>()
+            .expect("[ERR] Couldn't parse quality as an unsigned integer")
     } else {
-        println!("[WRN] Correction disabled");
         0
     };
     let sam_num_over = sam_num + (2 * sinc_overlap - 1) * num_channels;
@@ -91,7 +97,7 @@ pub fn main(args: &ArgMatches) {
     );
     println!("[?25l");
     let mut corrected_desync = 0;
-    let mut desync = SimpleMovingAverage::new(1000).unwrap();
+    let mut desync = SimpleMovingAverage::new(avg_size).unwrap();
 
     let sample_duration = 10f64.powi(9) / (fs as f64);
     let mut real_sample_duration = sample_duration;
@@ -99,7 +105,7 @@ pub fn main(args: &ArgMatches) {
     let mut last_samples_pushed = 0.;
     let mut last_delay = 0.;
     let mut last_stamp = 0.;
-    let mut real_sample_duration_avg = SimpleMovingAverage::new(1000).unwrap();
+    let mut real_sample_duration_avg = SimpleMovingAverage::new(avg_size).unwrap();
 
     let running = Arc::new(AtomicBool::new(true));
     {
@@ -116,7 +122,12 @@ pub fn main(args: &ArgMatches) {
 
         loop {
             let status = pcm.status().unwrap();
-            stamps.push(timespec_to_ns(status.get_htstamp()));
+            let stamp = timespec_to_ns(status.get_htstamp());
+            if stamp == *stamps.last().unwrap_or(&0.) {
+                continue;
+            }
+
+            stamps.push(stamp);
             let delay = status.get_delay() as f64;
             delays.push(delay);
 
@@ -126,7 +137,11 @@ pub fn main(args: &ArgMatches) {
         }
 
         real_sample_duration = real_sample_duration_avg.next(
-            if !args.is_present("no-estimation") && pcm.state() == State::Running && last_delay > 0. && last_samples_pushed > 0. {
+            if !args.is_present("no-estimation")
+                && pcm.state() == State::Running
+                && last_delay > 0.
+                && last_samples_pushed > 0.
+            {
                 let mut skipped = 0;
                 stamps
                     .iter()

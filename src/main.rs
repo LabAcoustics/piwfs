@@ -46,6 +46,22 @@ fn main() {
                         .takes_value(true),
                 )
                 .arg(
+                    Arg::with_name("average")
+                        .short("a")
+                        .long("average")
+                        .value_name("AVG_SIZE")
+                        .help("Sets length of moving average")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("quality")
+                        .short("q")
+                        .long("quality")
+                        .value_name("SINC_SAMPLES")
+                        .help("Interpolation quality")
+                        .takes_value(true),
+                )
+                .arg(
                     Arg::with_name("no-correction")
                         .long("no-correction")
                         .help("Disables resampling"),
