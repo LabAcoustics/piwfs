@@ -78,10 +78,12 @@ pub fn main(args: Args) {
     let mut corrected_desync = 0;
     let mut desync = SimpleMovingAverage::new(1000).unwrap();
 
-    let mut last_samples_pushed = 0.;
-    let mut real_sample_duration_avg = SimpleMovingAverage::new(1000).unwrap();
-
     let sample_duration = pow(10., 9) / (fs as f64);
+
+    let mut last_samples_pushed = 0.;
+    let mut last_delay = 0.;
+    let mut last_stamp = 0.;
+    let mut real_sample_duration_avg = SimpleMovingAverage::new(1000).unwrap();
 
     let running = Arc::new(AtomicBool::new(true));
     {
@@ -92,15 +94,13 @@ pub fn main(args: Args) {
         .expect("Error setting Ctrl-C handler");
     }
 
-    let mut next_sample_time = -1.;
-
     while running.load(Ordering::SeqCst) {
         let mut stamps = Vec::new();
         let mut delays = Vec::new();
 
         loop {
             let status = pcm.status().unwrap();
-            stamps.push(timespec_to_ns(status.get_driver_htstamp()));
+            stamps.push(timespec_to_ns(status.get_htstamp()));
             let delay = status.get_delay() as f64;
             delays.push(delay);
 
@@ -111,19 +111,32 @@ pub fn main(args: Args) {
             }
         }
 
-        let real_sample_duration = real_sample_duration_avg.next(if last_samples_pushed > 0. {
-            stamps
-                .iter()
-                .zip(delays.iter())
-                .fold(0., |acc, (stamp, delay)| {
-                    acc + (stamp - next_sample_time) / (last_samples_pushed - delay)
-                })
-                / (stamps.len() as f64)
-        } else {
-            sample_duration
-        });
+        let real_sample_duration = real_sample_duration_avg.next(
+            if pcm.state() == State::Running && last_delay > 0. && last_samples_pushed > 0. {
+                let mut skipped = 0;
+                stamps
+                    .iter()
+                    .zip(delays.iter())
+                    .fold(0., |acc, (stamp, delay)| {
+                        let mtime =
+                            (stamp - last_stamp) / (last_delay + last_samples_pushed - delay);
+                        //println!("DBG: s = {}, ls = {}, d = {}, ld = {}, lsp = {}, t = {}", stamp, last_stamp, delay, last_delay, last_samples_pushed, mtime);
+                        acc + if last_samples_pushed == *delay {
+                            skipped += 1;
+                            0.
+                        } else {
+                            assert!(mtime > 0., format!("ERR: Mean sample time less than zero!"));
+                            mtime
+                        }
+                    })
+                    / (stamps.len() - skipped) as f64
+            } else {
+                sample_duration
+            },
+        );
+
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num_over);
-        next_sample_time = stamps
+        let mut next_sample_time = stamps
             .iter()
             .zip(delays.iter())
             .fold(0., |acc, (stamp, delay)| {
@@ -187,17 +200,26 @@ pub fn main(args: Args) {
         };
 
         print!(
-            "Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:+.3}%  Next sample at: {}  (mean of {})    \r",
+            "Desync: {:.2}  Correction: {}  Delay: {}  Freq: {:+.3}%  Mean: {}    \r",
             cur_desync,
             corrected_desync,
             delays.last().unwrap(),
             100. * (real_sample_duration / sample_duration - 1.),
-            next_sample_time,
             delays.len()
         );
 
         match io.writei(&buf) {
-            Ok(num) => last_samples_pushed = num as f64,
+            Ok(num) => {
+                last_samples_pushed = num as f64;
+                last_delay = *delays.first().unwrap();
+                last_stamp = stamps
+                    .iter()
+                    .zip(delays.iter())
+                    .fold(0., |acc, (stamp, delay)| {
+                        acc + stamp - (last_delay - delay) * real_sample_duration
+                    })
+                    / stamps.len() as f64;
+            }
             Err(err) => {
                 if err == alsa::Error::new("snd_pcm_writei", libc::EPIPE) {
                     println!("\nERR: Underflow detected!");
