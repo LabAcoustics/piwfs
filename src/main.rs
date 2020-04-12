@@ -46,11 +46,18 @@ fn main() {
                         .takes_value(true),
                 )
                 .arg(
-                    Arg::with_name("average")
+                    Arg::with_name("desync-avg")
+                        .long("desync-avg")
                         .short("a")
-                        .long("average")
                         .value_name("AVG_SIZE")
-                        .help("Sets length of moving average")
+                        .help("Sets length of moving average for desync calculation")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("estimation-avg")
+                        .long("estimation-avg")
+                        .value_name("AVG_SIZE")
+                        .help("Sets length of moving average for sample length estimation")
                         .takes_value(true),
                 )
                 .arg(
@@ -65,6 +72,11 @@ fn main() {
                     Arg::with_name("no-correction")
                         .long("no-correction")
                         .help("Disables resampling"),
+                )
+                .arg(
+                    Arg::with_name("no-spinning")
+                        .long("no-spinning")
+                        .help("Disables spinning for multiple pcm statuses"),
                 )
                 .arg(
                     Arg::with_name("no-estimation")
