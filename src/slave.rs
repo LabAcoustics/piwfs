@@ -108,7 +108,7 @@ pub fn main(args: &ArgMatches) {
     let sam_num_over = sam_num + (2*sinc_overlap + 1)*num_channels;
 
     let mut desync = SimpleMovingAverage::new(desync_avg_size).unwrap();
-    let mut correction = 0.;
+    let mut correction = 0;
 
     let sample_duration = TimeSpec::nanoseconds(10i64.pow(9) / (fs as i64));
     let mut real_sample_duration = sample_duration;
@@ -235,13 +235,13 @@ pub fn main(args: &ArgMatches) {
         let act_desync = next_sample - nr_sinc as f64;
 
         let cur_desync = if buf.len() < sam_num {
-            let cur_desync = desync.next(correction + act_desync);
-            let jump = (cur_desync - correction).floor();
-            let jumpto = nr_sinc as i64 + jump as i64 - sinc_overlap as i64;
+            let cur_desync = desync.next(correction as f64 + act_desync);
+            let jump = (cur_desync - correction as f64).floor() as i64;
+            let jumpto = nr_sinc as i64 + jump - sinc_overlap as i64;
             //println!("[DBG] ===============================");
             //println!("[DBG] j = {}, jt = {}, c = {}, lsp = {}", jump, jumpto, correction, last_samples_pushed);
 
-            if is_correction && jump != 0. && jumpto >= 0 {
+            if is_correction && jump != 0 && jumpto >= 0 {
                 reader.seek(jumpto as u32).unwrap();
                 correction += jump;
             }
@@ -256,7 +256,11 @@ pub fn main(args: &ArgMatches) {
                 }
             }
 
-            let ratio = cur_desync - correction;
+            if buf.len() == 0 {
+                break;
+            }
+
+            let ratio = cur_desync - correction as f64;
             if is_correction {
                 buf = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
             }
@@ -297,10 +301,6 @@ pub fn main(args: &ArgMatches) {
                     panic!(err);
                 }
             }
-        }
-
-        if buf.len() == 0 {
-            break;
         }
     }
     println!("[?25h");
