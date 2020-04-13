@@ -277,12 +277,12 @@ pub fn main(args: &ArgMatches) {
         };
 
         print!(
-            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Est. Error: {:.2}, Spins: {}    \r",
+            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:.0} us, Spins: {}    \r",
             cur_desync,
             act_desync,
             delays.last().unwrap(),
             100. * (real_sample_duration.num_nanoseconds() as f64 / sample_duration.num_nanoseconds() as f64 - 1.),
-            est_error,
+            est_error/1000.,
             delays.len()
         );
         //println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}", next_sample, next_read, nr_sinc, next_sample_time);
