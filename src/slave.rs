@@ -19,16 +19,16 @@ use libc;
 use clap::ArgMatches;
 
 fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize) -> Vec<i16> {
-    let out_size = buf.len() - (2 * size + 1) * num_channels;
+    let out_size = buf.len() - (2 * size - 1) * num_channels;
     let mut out = vec![0; out_size];
     for channel in 0..num_channels {
         for out_it in (channel..out_size).step_by(num_channels) {
             let mut interp = 0.;
             for in_it in
-                ((channel + out_it)..(out_it + (2 * size + 1) * num_channels)).step_by(num_channels)
+                ((channel + out_it)..(out_it + (2 * size - 1) * num_channels)).step_by(num_channels)
             {
                 let cur_r = PI
-                    * (ratio + (out_it / num_channels + size) as f64
+                    * (ratio + (out_it / num_channels + size - 1) as f64
                         - (in_it / num_channels) as f64);
                 interp += (buf[in_it] as f64) * cur_r.sin() / cur_r;
             }
@@ -92,7 +92,7 @@ pub fn main(args: &ArgMatches) {
     pcm.sw_params(&swp).unwrap();
     let sinc_overlap = if is_correction {
         args.value_of("quality")
-            .unwrap_or("2")
+            .unwrap_or("3")
             .parse::<usize>()
             .expect("[ERR] Couldn't parse quality as an unsigned integer")
     } else {
@@ -105,7 +105,7 @@ pub fn main(args: &ArgMatches) {
     println!("[?25l");
 
     let sam_num = period_size as usize * num_channels;
-    let sam_num_over = sam_num + (2*sinc_overlap + 1)*num_channels;
+    let sam_num_over = sam_num + (2*sinc_overlap - 1)*num_channels;
 
     let mut desync = SimpleMovingAverage::new(desync_avg_size).unwrap();
     let mut correction = 0;
@@ -230,14 +230,14 @@ pub fn main(args: &ArgMatches) {
 
         let next_sample = (next_sample_time - startstamp).num_nanoseconds() as f64 / sample_duration.num_nanoseconds() as f64;
         let next_read = next_rdr_sample(&mut reader);
-        let nr_sinc = next_read as i64 - sinc_overlap as i64 - 1;
+        let nr_sinc = next_read as i64 + sinc_overlap as i64 - 1;
         let nr_sinc = if nr_sinc < 0 { 0 } else { nr_sinc };
         let act_desync = next_sample - nr_sinc as f64;
 
         let cur_desync = if buf.len() < sam_num {
             let cur_desync = desync.next(correction as f64 + act_desync);
             let jump = (cur_desync - correction as f64).floor() as i64;
-            let jumpto = nr_sinc as i64 + jump - sinc_overlap as i64;
+            let jumpto = nr_sinc as i64 + jump - sinc_overlap as i64 + 1;
             //println!("[DBG] ===============================");
             //println!("[DBG] j = {}, jt = {}, c = {}, lsp = {}", jump, jumpto, correction, last_samples_pushed);
 
@@ -263,6 +263,13 @@ pub fn main(args: &ArgMatches) {
             let ratio = cur_desync - correction as f64;
             if is_correction {
                 buf = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
+                reader
+                    .seek(
+                        (nr_sinc as i64 + jump as i64 + (buf.len() / num_channels) as i64
+                            - sinc_overlap as i64
+                            + 1) as u32,
+                    )
+                    .unwrap();
             }
             cur_desync
         } else {
