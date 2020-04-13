@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use std::convert::TryInto;
+use std::collections::VecDeque;
 use std::f64::consts::PI;
 
 use libc;
@@ -117,6 +118,10 @@ pub fn main(args: &ArgMatches) {
     let mut last_delay = 0;
     let mut last_stamp = TimeSpec::zero();
 
+    let mut samples_pushed = 0;
+    let mut nsts = VecDeque::new();
+    let mut est_error_avg = SimpleMovingAverage::new(1000).unwrap();
+
     let running = Arc::new(AtomicBool::new(true));
     {
         let r = running.clone();
@@ -127,6 +132,7 @@ pub fn main(args: &ArgMatches) {
     }
 
     while running.load(Ordering::SeqCst) {
+        samples_pushed += last_samples_pushed;
         let mut stamps = Vec::new();
         let mut delays = Vec::new();
 
@@ -140,20 +146,42 @@ pub fn main(args: &ArgMatches) {
 
             let delay = status.get_delay();
 
-            if is_spinning {
+            //if is_spinning {
                 stamps.push(stamp);
                 delays.push(delay);
-            } else {
-                std::thread::sleep(std::time::Duration::from_nanos(sample_duration.num_nanoseconds() as u64 / 2));
-            }
+            //} else {
+                //std::thread::sleep(std::time::Duration::from_nanos(sample_duration.num_nanoseconds() as u64 / 2));
+            //}
 
             if status.get_state() != State::Running || delay < buffer_fill.into() {
-                if !is_spinning {
-                    stamps.push(stamp);
-                    delays.push(delay);
+                //if !is_spinning {
+                    //stamps.push(stamp);
+                    //delays.push(delay);
+                //}
+                break;
+            }
+        }
+        let mut est_error = 0.;
+        for (stamp, delay) in stamps.iter().zip(delays.iter()) {
+            loop {
+                if let Some((ns, nst)) = nsts.get(0) {
+                    let cur_ns = samples_pushed - delay;
+                    if cur_ns == *ns {
+                        let err: TimeSpec = *nst - *stamp;
+                        //println!("[DBG] Est error: {} (est = {}, act = {})", *nst - *stamp, nst, stamp);
+                        est_error = est_error_avg.next(err.num_nanoseconds().abs() as f64);
+                        nsts.remove(0);
+                    } else if cur_ns > *ns {
+                        nsts.remove(0);
+                        continue;
+                    }           
                 }
                 break;
             }
+        }
+        if !is_spinning {
+            stamps = vec![*stamps.last().unwrap()];
+            delays = vec![*delays.last().unwrap()];
         }
 
         real_sample_duration = TimeSpec::nanoseconds(real_sample_duration_avg.next(
@@ -162,30 +190,24 @@ pub fn main(args: &ArgMatches) {
                 && last_delay > 0
                 && last_samples_pushed > 0
             {
-                let mut skipped = 0;
                 stamps
                     .iter()
                     .zip(delays.iter())
-                    .fold(0, |acc, (stamp, delay)| {
-                        let mtime =
-                            (*stamp - last_stamp).num_nanoseconds() / (last_delay + last_samples_pushed - delay) as i64;
+                    .fold(0., |acc, (stamp, delay)| {
+                        let mtime = (*stamp - last_stamp).num_nanoseconds() as f64 / (last_delay + last_samples_pushed - delay) as f64;
                         //println!("[DBG] s = {}, ls = {}, d = {}, ld = {}, lsp = {}, t = {}", stamp, last_stamp, delay, last_delay, last_samples_pushed, mtime);
-                        acc + if last_samples_pushed == *delay {
-                            skipped += 1;
-                            0
-                        } else {
+                        acc + if last_samples_pushed == *delay { 0. } else {
                             assert!(
-                                mtime > 0,
+                                mtime > 0.,
                                 format!("[ERR] Mean sample time less than zero!")
                             );
-                            mtime
+                            mtime / stamps.len() as f64
                         }
-                    }) as f64
-                    / (stamps.len() - skipped) as f64
+                    })
             } else {
                 real_sample_duration.num_nanoseconds() as f64
             },
-        ) as i64);
+        ).round() as i64);
 
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num_over);
         let mut next_sample_time = stamps
@@ -194,6 +216,7 @@ pub fn main(args: &ArgMatches) {
             .fold(TimeSpec::zero(), |acc, (stamp, delay)| {
                 acc + (*stamp + real_sample_duration * (*delay).try_into().unwrap()) / (stamps.len() as i32)
             });
+        nsts.push_back((samples_pushed, next_sample_time));
 
         while startstamp > next_sample_time {
             for _ in 0..num_channels {
@@ -205,18 +228,18 @@ pub fn main(args: &ArgMatches) {
             }
         }
 
-        let next_sample = (next_sample_time - startstamp).num_nanoseconds() / sample_duration.num_nanoseconds();
+        let next_sample = (next_sample_time - startstamp).num_nanoseconds() as f64 / sample_duration.num_nanoseconds() as f64;
         let next_read = next_rdr_sample(&mut reader);
         let nr_sinc = next_read as i64 - sinc_overlap as i64 - 1;
         let nr_sinc = if nr_sinc < 0 { 0 } else { nr_sinc };
-        let act_desync = next_sample - nr_sinc;
+        let act_desync = next_sample - nr_sinc as f64;
 
         let cur_desync = if buf.len() < sam_num {
-            let cur_desync = desync.next(correction + act_desync as f64);
+            let cur_desync = desync.next(correction + act_desync);
             let jump = (cur_desync - correction).floor();
             let jumpto = nr_sinc as i64 + jump as i64 - sinc_overlap as i64;
-            println!("[DBG] ===============================");
-            println!("[DBG] j = {}, jt = {}", jump, jumpto);
+            //println!("[DBG] ===============================");
+            //println!("[DBG] j = {}, jt = {}, c = {}, lsp = {}", jump, jumpto, correction, last_samples_pushed);
 
             if is_correction && jump != 0. && jumpto >= 0 {
                 reader.seek(jumpto as u32).unwrap();
@@ -243,14 +266,15 @@ pub fn main(args: &ArgMatches) {
         };
 
         print!(
-            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Spins: {}    \r",
+            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Est. Error: {:.2}, Spins: {}    \r",
             cur_desync,
             act_desync,
             delays.last().unwrap(),
             100. * (real_sample_duration.num_nanoseconds() as f64 / sample_duration.num_nanoseconds() as f64 - 1.),
+            est_error,
             delays.len()
         );
-        println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}, lsp = {}", next_sample, next_read, nr_sinc, next_sample_time, last_samples_pushed);
+        //println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}", next_sample, next_read, nr_sinc, next_sample_time);
 
         match io.writei(&buf) {
             Ok(num) => {
