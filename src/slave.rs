@@ -111,13 +111,13 @@ pub fn main(args: &ArgMatches) {
     let mut act_desync_avg = SimpleMovingAverage::new(desync_avg_size/2).unwrap();
     let mut correction = 0;
 
-    let sample_duration = TimeSpec::nanoseconds(10i64.pow(9) / (fs as i64));
+    let sample_duration = 10f64.powi(9) / (fs as f64);
     let mut real_sample_duration = sample_duration;
     let mut real_sample_duration_avg = SimpleMovingAverage::new(est_avg_size).unwrap();
 
     let mut last_samples_pushed = 0;
-    let mut last_delay = 0;
-    let mut last_stamp = TimeSpec::zero();
+    let mut last_delays = Vec::new();
+    let mut last_stamps = Vec::new();
 
     let mut samples_pushed = 0;
     let mut nsts = VecDeque::new();
@@ -185,37 +185,45 @@ pub fn main(args: &ArgMatches) {
             delays = vec![*delays.last().unwrap()];
         }
 
-        real_sample_duration = TimeSpec::nanoseconds(real_sample_duration_avg.next(
+        real_sample_duration = real_sample_duration_avg.next(
             if !args.is_present("no-estimation")
                 && pcm.state() == State::Running
-                && last_delay > 0
                 && last_samples_pushed > 0
             {
                 stamps
                     .iter()
                     .zip(delays.iter())
                     .fold(0., |acc, (stamp, delay)| {
-                        let mtime = (*stamp - last_stamp).num_nanoseconds() as f64 / (last_delay + last_samples_pushed - delay) as f64;
                         //println!("[DBG] s = {}, ls = {}, d = {}, ld = {}, lsp = {}, t = {}", stamp, last_stamp, delay, last_delay, last_samples_pushed, mtime);
-                        acc + if last_samples_pushed == *delay { 0. } else {
-                            assert!(
-                                mtime > 0.,
-                                format!("[ERR] Mean sample time less than zero!")
-                            );
-                            mtime / stamps.len() as f64
+                        let mtime = last_stamps
+                            .iter()
+                            .zip(last_delays.iter())
+                            .fold(0., |acc2, (last_stamp, last_delay)| {
+                                acc2 + if *last_delay <= 0 {
+                                    println!("\n[WRN] Delay less or equal 0!");
+                                    real_sample_duration
+                                } else {
+                                    (*stamp - *last_stamp).num_nanoseconds() as f64 / (last_delay + last_samples_pushed - delay) as f64
+                                }
+                            }) / last_stamps.len() as f64;
+                        acc + if mtime > 0. {
+                            mtime 
+                        } else {
+                            println!("\n[WRN] Mean sample time less or equal to zero!");
+                            real_sample_duration
                         }
-                    })
+                    }) / stamps.len() as f64
             } else {
-                real_sample_duration.num_nanoseconds() as f64
+                real_sample_duration
             },
-        ).round() as i64);
+        );
 
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num_over);
         let mut next_sample_time = stamps
             .iter()
             .zip(delays.iter())
             .fold(TimeSpec::zero(), |acc, (stamp, delay)| {
-                acc + (*stamp + real_sample_duration * (*delay).try_into().unwrap()) / (stamps.len() as i32)
+                acc + (*stamp + TimeSpec::nanoseconds((real_sample_duration * *delay as f64).round() as i64)) / (stamps.len() as i32)
             });
         nsts.push_back((samples_pushed, next_sample_time));
 
@@ -223,7 +231,7 @@ pub fn main(args: &ArgMatches) {
             for _ in 0..num_channels {
                 buf.push(0)
             }
-            next_sample_time = next_sample_time + real_sample_duration;
+            next_sample_time = next_sample_time + TimeSpec::nanoseconds(real_sample_duration as i64);
             if buf.len() == sam_num {
                 break;
             } else if buf.len() > sam_num {
@@ -231,10 +239,9 @@ pub fn main(args: &ArgMatches) {
             }
         }
 
-        let next_sample = (next_sample_time - startstamp).num_nanoseconds() as f64 / sample_duration.num_nanoseconds() as f64;
-        let next_read = next_rdr_sample(&mut reader);
-        let nr_sinc = next_read.saturating_sub(sinc_overlap as u32);//+ sinc_overlap as i64 - 1;
-        let act_desync = next_sample - nr_sinc as f64;
+        let next_sample = (next_sample_time - startstamp).num_nanoseconds() as f64 / sample_duration;
+        let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32);
+        let act_desync = next_sample - next_read as f64;
 
         let cur_desync = if buf.len() < sam_num {
             let cur_desync = desync.next(act_desync_avg.next(correction as f64 + act_desync));
@@ -243,11 +250,11 @@ pub fn main(args: &ArgMatches) {
                 next_read.saturating_add(jump as u32)
             } else {
                 next_read.saturating_sub((-jump) as u32)
-            };
+            }.saturating_sub(sinc_overlap as u32 - 1);
             //println!("[DBG] ===============================");
             //println!("[DBG] j = {}, jt = {}, c = {}, lsp = {}", jump, jumpto, correction, last_samples_pushed);
 
-            if is_correction && jump != 0 {
+            if is_correction {
                 reader.seek(jumpto).unwrap();
                 correction += jump;
             }
@@ -264,43 +271,41 @@ pub fn main(args: &ArgMatches) {
                 }
             }
 
+            let ratio = cur_desync - correction as f64;
+            if is_correction  {
+                buf = if buf.len() >= 2*sinc_overlap {
+                    sinc_move_inter(&buf, ratio, sinc_overlap, num_channels)
+                } else {
+                    buf[sinc_overlap - 1..].into()
+                }
+            }
+
             if buf.len() == 0 {
                 break;
             }
 
-            let ratio = cur_desync - correction as f64;
-            if is_correction {
-                buf = sinc_move_inter(&buf, ratio, sinc_overlap, num_channels);
-                //assert_eq!(next_rdr_sample(&mut reader), (jumpto as i64 + (buf.len() / num_channels) as i64 + sinc_overlap as i64) as u32);
-                reader.seek(jumpto + (buf.len() / num_channels) as u32).unwrap();
-            }
             cur_desync
         } else {
             next_sample as f64
         };
 
         print!(
-            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:.0} us, Spins: {}    \r",
+            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:.0} us, Spins: {}[K\r",
             cur_desync,
             act_desync,
             delays.last().unwrap(),
-            100. * (real_sample_duration.num_nanoseconds() as f64 / sample_duration.num_nanoseconds() as f64 - 1.),
+            100. * (sample_duration / real_sample_duration - 1.),
             est_error/1000.,
             delays.len()
         );
-        //println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}", next_sample, next_read, nr_sinc, next_sample_time);
+        //println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}", next_sample, next_read, next_read, next_sample_time);
 
         match io.writei(&buf) {
             Ok(num) => {
                 assert_eq!(num, buf.len()/num_channels);
                 last_samples_pushed = num.try_into().unwrap();
-                last_delay = *delays.first().unwrap();
-                last_stamp = stamps
-                    .iter()
-                    .zip(delays.iter())
-                    .fold(TimeSpec::zero(), |acc, (stamp, delay)| {
-                        acc + (*stamp -  real_sample_duration * (last_delay - delay).try_into().unwrap()) / stamps.len() as i32
-                    });
+                last_delays = delays;
+                last_stamps = stamps;
             }
             Err(err) => {
                 if err == alsa::Error::new("snd_pcm_writei", libc::EPIPE) {
