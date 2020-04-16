@@ -19,16 +19,16 @@ use libc;
 use clap::ArgMatches;
 
 fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize) -> Vec<i16> {
-    let out_size = buf.len() - (2 * size - 1) * num_channels;
+    let out_size = buf.len() - (2 * size + 1) * num_channels;
     let mut out = vec![0; out_size];
     for channel in 0..num_channels {
         for out_it in (channel..out_size).step_by(num_channels) {
             let mut interp = 0.;
             for in_it in
-                ((channel + out_it)..(out_it + (2 * size - 1) * num_channels)).step_by(num_channels)
+                ((channel + out_it)..(out_it + (2 * size + 1) * num_channels)).step_by(num_channels)
             {
                 let cur_r = PI
-                    * (ratio + (out_it / num_channels + size - 1) as f64
+                    * (ratio + (out_it / num_channels + size) as f64
                         - (in_it / num_channels) as f64);
                 interp += (buf[in_it] as f64) * cur_r.sin() / cur_r;
             }
@@ -92,7 +92,7 @@ pub fn main(args: &ArgMatches) {
     pcm.sw_params(&swp).unwrap();
     let sinc_overlap = if is_correction {
         args.value_of("quality")
-            .unwrap_or("3")
+            .unwrap_or("2")
             .parse::<usize>()
             .expect("[ERR] Couldn't parse quality as an unsigned integer")
     } else {
@@ -105,10 +105,10 @@ pub fn main(args: &ArgMatches) {
     println!("[?25l");
 
     let sam_num = period_size as usize * num_channels;
-    let sam_num_over = sam_num + (2*sinc_overlap - 1)*num_channels;
+    let sam_num_over = sam_num + (2*sinc_overlap + 1)*num_channels;
 
     let mut desync = SimpleMovingAverage::new(desync_avg_size).unwrap();
-    let mut act_desync_avg = SimpleMovingAverage::new(desync_avg_size/2).unwrap();
+    let mut act_desync_avg = SimpleMovingAverage::new(desync_avg_size*10).unwrap();
     let mut correction = 0;
 
     let sample_duration = 10f64.powi(9) / (fs as f64);
@@ -240,17 +240,19 @@ pub fn main(args: &ArgMatches) {
         }
 
         let next_sample = (next_sample_time - startstamp).num_nanoseconds() as f64 / sample_duration;
-        let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32);
+        let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32 + 1);
         let act_desync = next_sample - next_read as f64;
+        let mut avg_act_desync = act_desync;
 
         let cur_desync = if buf.len() < sam_num {
-            let cur_desync = desync.next(act_desync_avg.next(correction as f64 + act_desync));
+            avg_act_desync = act_desync_avg.next(act_desync);
+            let cur_desync = desync.next(correction as f64 + avg_act_desync + act_desync);
             let jump = (cur_desync - correction as f64).floor() as i64;
             let jumpto = if jump > 0 {
                 next_read.saturating_add(jump as u32)
             } else {
                 next_read.saturating_sub((-jump) as u32)
-            }.saturating_sub(sinc_overlap as u32 - 1);
+            }.saturating_sub(sinc_overlap as u32);
             //println!("[DBG] ===============================");
             //println!("[DBG] j = {}, jt = {}, c = {}, lsp = {}", jump, jumpto, correction, last_samples_pushed);
 
@@ -273,10 +275,10 @@ pub fn main(args: &ArgMatches) {
 
             let ratio = cur_desync - correction as f64;
             if is_correction  {
-                buf = if buf.len() >= 2*sinc_overlap {
+                buf = if buf.len() > (2*sinc_overlap + 1)*num_channels {
                     sinc_move_inter(&buf, ratio, sinc_overlap, num_channels)
                 } else {
-                    buf[sinc_overlap - 1..].into()
+                    buf[sinc_overlap..].into()
                 }
             }
 
@@ -292,7 +294,7 @@ pub fn main(args: &ArgMatches) {
         print!(
             "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:.0} us, Spins: {}[K\r",
             cur_desync,
-            act_desync,
+            avg_act_desync,
             delays.last().unwrap(),
             100. * (sample_duration / real_sample_duration - 1.),
             est_error/1000.,

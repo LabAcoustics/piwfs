@@ -5,7 +5,7 @@ mod slave;
 
 fn main() {
     let matches = App::new("piwfs")
-        .version("0.2.1")
+        .version("0.2.2")
         .author("Szymon Mikulicz <szymon.mikulicz@posteo.net>")
         .about("Wafe Field Synthesis for Raspberry Pi")
         .subcommand(
@@ -17,7 +17,7 @@ fn main() {
         .subcommand(
             SubCommand::with_name("slave")
                 .about("The slave instance")
-                .version("0.2.1")
+                .version("0.2.2")
                 .author("Szymon Mikulicz <szymon.mikulicz@posteo.net>")
                 .arg(
                     Arg::with_name("device")
