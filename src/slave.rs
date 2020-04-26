@@ -1,20 +1,17 @@
 use alsa::pcm::{Access, Format, HwParams, State, PCM};
 use alsa::{Direction, ValueOr};
-use nix::sys::time::{TimeSpec, TimeValLike};
 use hound;
 
 use ta::indicators::SimpleMovingAverage;
 use ta::Next;
 
-use ctrlc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use std::convert::TryInto;
 use std::collections::VecDeque;
 use std::f64::consts::PI;
-
-use libc;
+use std::time::{Duration, UNIX_EPOCH, SystemTime};
 
 use clap::ArgMatches;
 
@@ -43,6 +40,14 @@ fn next_rdr_sample<T: std::io::Read>(reader: &mut hound::WavReader<T>) -> u32 {
     return (reader.len() - reader.samples::<i16>().len() as u32) / reader.spec().channels as u32;
 }
 
+fn abs_duration(lhs: SystemTime, rhs: SystemTime) -> Duration {
+    return if lhs > rhs {
+        lhs.duration_since(rhs).unwrap()
+    } else {
+        rhs.duration_since(lhs).unwrap()
+    }
+}
+
 pub fn main(args: &ArgMatches) {
     let pcm = PCM::new(
         &args.value_of("device").unwrap_or("hw:0"),
@@ -53,11 +58,11 @@ pub fn main(args: &ArgMatches) {
     let mut reader = hound::WavReader::open(args.value_of("testfile").unwrap()).unwrap();
     let is_correction = !args.is_present("no-correction");
     let is_spinning = !args.is_present("no-spinning");
-    let startstamp = TimeSpec::nanoseconds(args
+    let startstamp = UNIX_EPOCH + Duration::from_nanos(args
         .value_of("startat")
         .unwrap()
-        .parse::<i64>()
-        .expect("[ERR] Couldn't parse startat as a integer number"));
+        .parse::<u64>()
+        .expect("[ERR] Couldn't parse startat as a unsigned integer number"));
     let est_avg_size = args
         .value_of("estimation-avg")
         .unwrap_or("1000")
@@ -111,7 +116,7 @@ pub fn main(args: &ArgMatches) {
     let mut act_desync_avg = SimpleMovingAverage::new(desync_avg_size*10).unwrap();
     let mut correction = 0;
 
-    let sample_duration = 10f64.powi(9) / (fs as f64);
+    let sample_duration = 1. / (fs as f64);
     let mut real_sample_duration = sample_duration;
     let mut real_sample_duration_avg = SimpleMovingAverage::new(est_avg_size).unwrap();
 
@@ -123,16 +128,10 @@ pub fn main(args: &ArgMatches) {
     let mut nsts = VecDeque::new();
     let mut est_error_avg = SimpleMovingAverage::new(1000).unwrap();
 
-    let running = Arc::new(AtomicBool::new(true));
-    {
-        let r = running.clone();
-        ctrlc::set_handler(move || {
-            r.store(false, Ordering::SeqCst);
-        })
-        .expect("[ERR] Error setting Ctrl-C handler");
-    }
-
-    while running.load(Ordering::SeqCst) {
+    let sigint = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&sigint))
+        .expect("[ERR] Error setting SIGINT hook");
+    while !sigint.load(Ordering::Relaxed) {
         samples_pushed += last_samples_pushed;
         let mut stamps = Vec::new();
         let mut delays = Vec::new();
@@ -140,7 +139,7 @@ pub fn main(args: &ArgMatches) {
         loop {
             let status = pcm.status().unwrap();
             let libc_stamp = status.get_htstamp();
-            let stamp = TimeSpec::seconds(libc_stamp.tv_sec.into()) + TimeSpec::nanoseconds(libc_stamp.tv_nsec.into());
+            let stamp = UNIX_EPOCH + Duration::new(libc_stamp.tv_sec.try_into().unwrap(), libc_stamp.tv_nsec.try_into().unwrap());
             if Some(&stamp) == stamps.last() {
                 continue;
             }
@@ -168,9 +167,9 @@ pub fn main(args: &ArgMatches) {
                 if let Some((ns, nst)) = nsts.get(0) {
                     let cur_ns = samples_pushed - delay;
                     if cur_ns == *ns {
-                        let err: TimeSpec = *nst - *stamp;
+                        let err = abs_duration(*nst, *stamp);
                         //println!("[DBG] Est error: {} (est = {}, act = {})", *nst - *stamp, nst, stamp);
-                        est_error = est_error_avg.next(err.num_nanoseconds().abs() as f64);
+                        est_error = est_error_avg.next(err.as_secs_f64());
                         nsts.remove(0);
                     } else if cur_ns > *ns {
                         nsts.remove(0);
@@ -203,7 +202,7 @@ pub fn main(args: &ArgMatches) {
                                     println!("\n[WRN] Delay less or equal 0!");
                                     real_sample_duration
                                 } else {
-                                    (*stamp - *last_stamp).num_nanoseconds() as f64 / (last_delay + last_samples_pushed - delay) as f64
+                                    stamp.duration_since(*last_stamp).expect("Last stamp is after new stamp!").as_secs_f64() / (last_delay + last_samples_pushed - delay) as f64
                                 }
                             }) / last_stamps.len() as f64;
                         acc + if mtime > 0. {
@@ -219,33 +218,33 @@ pub fn main(args: &ArgMatches) {
         );
 
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num_over);
-        let mut next_sample_time = stamps
+        let mut next_sample_time = UNIX_EPOCH + stamps
             .iter()
             .zip(delays.iter())
-            .fold(TimeSpec::zero(), |acc, (stamp, delay)| {
-                acc + (*stamp + TimeSpec::nanoseconds((real_sample_duration * *delay as f64).round() as i64)) / (stamps.len() as i32)
+            .fold(Duration::new(0,0), |acc, (stamp, delay)| {
+                acc + (stamp.duration_since(UNIX_EPOCH).unwrap() + Duration::from_secs_f64(real_sample_duration * *delay as f64)) / stamps.len().try_into().unwrap()
             });
         nsts.push_back((samples_pushed, next_sample_time));
 
-        while startstamp > next_sample_time {
+        let mut zeros_pushed = 0.;
+        while startstamp > next_sample_time + Duration::from_secs_f64(real_sample_duration * zeros_pushed) {
             for _ in 0..num_channels {
                 buf.push(0)
             }
-            next_sample_time = next_sample_time + TimeSpec::nanoseconds(real_sample_duration as i64);
+            zeros_pushed += 1.;
             if buf.len() == sam_num {
                 break;
             } else if buf.len() > sam_num {
                 unreachable!()
             }
         }
+        next_sample_time += Duration::from_secs_f64(real_sample_duration * zeros_pushed);
 
-        let next_sample = (next_sample_time - startstamp).num_nanoseconds() as f64 / sample_duration;
-        let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32 + 1);
-        let act_desync = next_sample - next_read as f64;
-        let mut avg_act_desync = act_desync;
-
-        let cur_desync = if buf.len() < sam_num {
-            avg_act_desync = act_desync_avg.next(act_desync);
+        let (cur_desync, avg_act_desync) = if buf.len() < sam_num {
+            let next_sample = next_sample_time.duration_since(startstamp).unwrap().as_secs_f64() / sample_duration;
+            let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32 + 1);
+            let act_desync = next_sample - next_read as f64;
+            let avg_act_desync = act_desync_avg.next(act_desync);
             let cur_desync = desync.next(correction as f64 + avg_act_desync + act_desync);
             let jump = (cur_desync - correction as f64).floor() as i64;
             let jumpto = if jump > 0 {
@@ -286,9 +285,9 @@ pub fn main(args: &ArgMatches) {
                 break;
             }
 
-            cur_desync
+            (cur_desync, avg_act_desync)
         } else {
-            next_sample as f64
+            (-startstamp.duration_since(next_sample_time).unwrap_or(Duration::new(0, 0)).as_secs_f64() / sample_duration, 0.)
         };
 
         print!(
@@ -297,7 +296,7 @@ pub fn main(args: &ArgMatches) {
             avg_act_desync,
             delays.last().unwrap(),
             100. * (sample_duration / real_sample_duration - 1.),
-            est_error/1000.,
+            est_error*1_000_000.,
             delays.len()
         );
         //println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}", next_sample, next_read, next_read, next_sample_time);
@@ -310,13 +309,12 @@ pub fn main(args: &ArgMatches) {
                 last_stamps = stamps;
             }
             Err(err) => {
-                if err == alsa::Error::new("snd_pcm_writei", libc::EPIPE) {
+                if let Some(errno) = err.errno() { if errno == nix::errno::Errno::EPIPE {
                     println!("\n[ERR] Underflow detected!");
-                    pcm.prepare().unwrap();
                     last_samples_pushed = 0;
                 } else {
                     panic!(err);
-                }
+                }}
             }
         }
     }

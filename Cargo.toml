@@ -8,9 +8,8 @@ edition = "2018"
 ta = "0.1"
 clap = "2"
 hound = "3.4"
-ctrlc = "3"
-libc = "0.2"
-nix = "0.17"
+signal-hook = "0"
+nix = "0"
 alsa = { path = "./alsa-rs" }
 
 [workspace]
