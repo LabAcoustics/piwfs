@@ -173,7 +173,7 @@ pub fn main(args: &ArgMatches) {
                 if let Some((ns, nst)) = nsts.get(0) {
                     let cur_ns = samples_pushed - delay;
                     if cur_ns == *ns {
-                        let err = duration_diff_secs_f64(*nst, *stamp);
+                        let err = duration_diff_secs_f64(*nst, *stamp)*1_000_000.;
                         //println!("[DBG] Est error: {} (est = {}, act = {})", *nst - *stamp, nst, stamp);
                         est_error = [est_error_var.next(err), est_error_var.average().unwrap()];
                         nsts.remove(0);
@@ -319,13 +319,13 @@ pub fn main(args: &ArgMatches) {
         };
 
         print!(
-            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:.0}{:+.1} us, Spins: {}[K\r",
+            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:.0}±{:.0} us, Spins: {}[K\r",
             cur_desync,
             avg_act_desync,
             delays.last().unwrap(),
             100. * (sample_duration / real_sample_duration - 1.),
-            est_error[1]*1_000_000.,
-            est_error[0]*1_000_000.,
+            est_error[1],
+            est_error[0].sqrt(),
             delays.len()
         );
         //println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}", next_sample, next_read, next_read, next_sample_time);
@@ -340,8 +340,9 @@ pub fn main(args: &ArgMatches) {
             Err(err) => {
                 if let Some(errno) = err.errno() {
                     if errno == nix::errno::Errno::EPIPE {
-                        println!("\n[ERR] Underflow detected!");
+                        println!("\n[ERR] ALSA buffer underrun!");
                         last_samples_pushed = 0;
+                        pcm.prepare().unwrap();
                     } else {
                         panic!(err);
                     }
