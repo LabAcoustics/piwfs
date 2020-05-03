@@ -5,7 +5,6 @@ authors = ["Ashymad <szymon.mikulicz@posteo.net>"]
 edition = "2018"
 
 [dependencies]
-ta = "0.1"
 clap = "2"
 hound = "3.4"
 signal-hook = "0"
