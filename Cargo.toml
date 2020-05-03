@@ -8,11 +8,5 @@ edition = "2018"
 clap = "2"
 hound = "3.4"
 signal-hook = "0"
+alsa = "0"
 nix = "0"
-alsa = { path = "./alsa-rs" }
-
-[workspace]
-members = [
-    "alsa-rs",
-    "alsa-sys",
-    ]

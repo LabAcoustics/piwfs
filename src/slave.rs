@@ -1,4 +1,4 @@
-use alsa::pcm::{Access, Format, HwParams, State, PCM};
+use alsa::pcm::{Access, Format, HwParams, State, PCM, TstampType};
 use alsa::{Direction, ValueOr};
 use hound;
 
@@ -94,7 +94,7 @@ pub fn main(args: &ArgMatches) {
     let buffer_fill = 2 * period_size as i32 * num_channels as i32;
     swp.set_start_threshold(buffer_fill.into()).unwrap();
     swp.set_tstamp_mode(true).unwrap();
-    swp.set_tstamp_type().unwrap();
+    swp.set_tstamp_type(TstampType::Gettimeofday).unwrap();
     pcm.sw_params(&swp).unwrap();
     let sinc_overlap = if is_correction {
         args.value_of("quality")
