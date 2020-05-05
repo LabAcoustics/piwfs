@@ -359,7 +359,7 @@ pub fn main(args: &ArgMatches) {
                             };
                             println!("----> {} ended at {:?} (took {:?})", elapsed_times[ind].0, elapsed_times[ind].1, took_time);
                         }
-                        println!("----- Estimated time budget: {:?}", Duration::from_secs_f64(*delays.last().unwrap() as f64 * real_sample_duration));
+                        println!("----- Estimated time budget: {:?}", Duration::from_secs_f64(*delays.first().unwrap() as f64 * real_sample_duration));
                         last_samples_pushed = 0;
                         pcm.prepare().unwrap();
                     } else {
