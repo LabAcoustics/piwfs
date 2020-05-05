@@ -134,6 +134,8 @@ pub fn main(args: &ArgMatches) {
         .expect("[ERR] Error setting SIGINT hook");
 
     while !sigint.load(Ordering::Relaxed) {
+        let loop_start = std::time::Instant::now();
+        let mut elapsed_times = Vec::new();
         samples_pushed += last_samples_pushed;
         let mut stamps = Vec::new();
         let mut delays = Vec::new();
@@ -167,6 +169,7 @@ pub fn main(args: &ArgMatches) {
                 break;
             }
         }
+        elapsed_times.push(("Spinning", loop_start.elapsed()));
         let mut est_error = [0., 0.];
         for (stamp, delay) in stamps.iter().zip(delays.iter()) {
             loop {
@@ -185,6 +188,7 @@ pub fn main(args: &ArgMatches) {
                 break;
             }
         }
+        elapsed_times.push(("Error estimation", loop_start.elapsed()));
         //if !is_spinning {
         //    stamps = vec![*stamps.last().unwrap()];
         //    delays = vec![*delays.last().unwrap()];
@@ -227,6 +231,7 @@ pub fn main(args: &ArgMatches) {
                 real_sample_duration
             },
         );
+        elapsed_times.push(("Sample duration estimation", loop_start.elapsed()));
 
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num_over);
         let mut next_sample_time = UNIX_EPOCH
@@ -239,6 +244,7 @@ pub fn main(args: &ArgMatches) {
                         / stamps.len().try_into().unwrap()
                 });
         nsts.push_back((samples_pushed, next_sample_time));
+        elapsed_times.push(("Next sample time estimation", loop_start.elapsed()));
 
         let mut zeros_pushed = 0.;
         while startstamp
@@ -280,6 +286,7 @@ pub fn main(args: &ArgMatches) {
                 reader.seek(jumpto).unwrap();
                 correction += jump;
             }
+            elapsed_times.push(("Seeking", loop_start.elapsed()));
 
             for sample in reader.samples::<i16>() {
                 buf.push(match sample {
@@ -301,6 +308,7 @@ pub fn main(args: &ArgMatches) {
                     buf[sinc_overlap..].into()
                 }
             }
+            elapsed_times.push(("Interpolation", loop_start.elapsed()));
 
             if buf.len() == 0 {
                 break;
@@ -319,7 +327,7 @@ pub fn main(args: &ArgMatches) {
         };
 
         print!(
-            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:.0}±{:.0} us, Spins: {}[K\r",
+            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:+.0}±{:.0} us, Spins: {}[K\r",
             cur_desync,
             avg_act_desync,
             delays.last().unwrap(),
@@ -329,6 +337,7 @@ pub fn main(args: &ArgMatches) {
             delays.len()
         );
         //println!("\n[DBG] ns = {}, nr = {}, nrs = {}, nst = {}", next_sample, next_read, next_read, next_sample_time);
+        elapsed_times.push(("Printing", loop_start.elapsed()));
 
         match io.writei(&buf) {
             Ok(num) => {
@@ -341,6 +350,16 @@ pub fn main(args: &ArgMatches) {
                 if let Some(errno) = err.errno() {
                     if errno == nix::errno::Errno::EPIPE {
                         println!("\n[ERR] ALSA buffer underrun!");
+                        println!("----- Execution times breakdown:");
+                        for ind in 0..elapsed_times.len() {
+                            let took_time = if ind > 0 {
+                                elapsed_times[ind].1 - elapsed_times[ind-1].1
+                            } else {
+                                elapsed_times[ind].1
+                            };
+                            println!("----> {} ended at {:?} (took {:?})", elapsed_times[ind].0, elapsed_times[ind].1, took_time);
+                        }
+                        println!("----- Estimated time budget: {:?}", Duration::from_secs_f64(*delays.last().unwrap() as f64 * real_sample_duration));
                         last_samples_pushed = 0;
                         pcm.prepare().unwrap();
                     } else {
