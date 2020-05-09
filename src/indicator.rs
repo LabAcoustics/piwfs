@@ -183,22 +183,23 @@ where
     }
 
     fn cmp_exch(&mut self, i: isize, j: isize) -> bool {
-        return self.less(i, j) && {
+        return if self.less(i, j)  {
             self.exchange(i, j);
             true
-        };
+        } else {
+            false
+        }
     }
 
     fn min_sort_up(&mut self, mut i: isize) -> bool {
-        while i > 0 && self.cmp_exch(i/2, i) {
+        while i > 0 && self.cmp_exch(i, i/2) {
             i /= 2;
         }
         return i == 0;
     }
 
     fn min_sort_down(&mut self, mut i: isize) {
-        while i <= self.min_ct {
-            i *= 2;
+        while {i *= 2; i <= self.min_ct} {
             if i < self.min_ct && self.less(i+1, i) {
                 i += 1;
             }
@@ -210,15 +211,14 @@ where
     }
 
     fn max_sort_up(&mut self, mut i: isize) -> bool {
-        while i < 0 && self.cmp_exch(i, i/2) {
+        while i < 0 && self.cmp_exch(i/2, i) {
             i /= 2;
         }
         return i == 0;
     }
 
     fn max_sort_down(&mut self, mut i: isize) {
-        while i >= -self.max_ct {
-            i *= 2;
+        while {i *= 2; i >= -self.max_ct} {
             if i > -self.max_ct && self.less(i, i-1) {
                 i -= 1;
             }
@@ -259,17 +259,18 @@ where
     }
     fn next(&mut self, el: E) -> E {
         let p = self.pos[self.idx];
-        let old = self.data[self.idx];
+        let mut old = None;
         if self.data.len() <= self.idx {
             self.data.push(el);
         } else {
+            old = Some(self.data[self.idx]);
             self.data[self.idx] = el;
         }
         self.idx = (self.idx + 1) % self.size;
         if p > 0 {
             if self.min_ct < ((self.size-1)/2) as isize {
                 self.min_ct += 1;
-            } else if el > old {
+            } else if el > old.unwrap() {
                 self.min_sort_down(p);
                 return self.value().unwrap();
             }
@@ -279,7 +280,7 @@ where
         } else if p < 0 {
             if self.max_ct < (self.size/2) as isize {
                 self.max_ct += 1;
-            } else if el < old {
+            } else if el < old.unwrap() {
                 self.max_sort_down(p);
                 return self.value().unwrap();
             }
@@ -290,7 +291,7 @@ where
             if self.max_ct != 0 && self.max_sort_up(-1) {
                 self.max_sort_down(-1);
             }
-            if self.min_ct != 0 && self.min_sort_up(-1) {
+            if self.min_ct != 0 && self.min_sort_up(1) {
                 self.min_sort_down(1);
             }
         }
