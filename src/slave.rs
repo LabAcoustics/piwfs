@@ -1,8 +1,8 @@
-use alsa::pcm::{Access, Format, HwParams, State, PCM, TstampType};
+use alsa::pcm::{Access, Format, HwParams, State, TstampType, PCM};
 use alsa::{Direction, ValueOr};
 use hound;
 
-use crate::indicator::{Indicator, SimpleMovingAverage, WelfordsMovingVariance};
+use crate::indicator::{Indicator, SimpleMovingAverage, WelfordsMovingVariance, SlidingMedianFilter};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -119,7 +119,7 @@ pub fn main(args: &ArgMatches) {
 
     let sample_duration = 1. / (fs as f64);
     let mut real_sample_duration = sample_duration;
-    let mut real_sample_duration_avg = SimpleMovingAverage::new(est_avg_size).unwrap();
+    let mut real_sample_duration_avg = SlidingMedianFilter::new(est_avg_size).unwrap();
 
     let mut last_samples_pushed = 0;
     let mut last_delays = Vec::new();
@@ -176,7 +176,7 @@ pub fn main(args: &ArgMatches) {
                 if let Some((ns, nst)) = nsts.get(0) {
                     let cur_ns = samples_pushed - delay;
                     if cur_ns == *ns {
-                        let err = duration_diff_secs_f64(*nst, *stamp)*1_000_000.;
+                        let err = duration_diff_secs_f64(*nst, *stamp) * 1_000_000.;
                         //println!("[DBG] Est error: {} (est = {}, act = {})", *nst - *stamp, nst, stamp);
                         est_error = [est_error_var.next(err), est_error_var.average().unwrap()];
                         nsts.remove(0);
@@ -353,13 +353,21 @@ pub fn main(args: &ArgMatches) {
                         println!("----- Execution times breakdown:");
                         for ind in 0..elapsed_times.len() {
                             let took_time = if ind > 0 {
-                                elapsed_times[ind].1 - elapsed_times[ind-1].1
+                                elapsed_times[ind].1 - elapsed_times[ind - 1].1
                             } else {
                                 elapsed_times[ind].1
                             };
-                            println!("----> {} ended at {:?} (took {:?})", elapsed_times[ind].0, elapsed_times[ind].1, took_time);
+                            println!(
+                                "----> {} ended at {:?} (took {:?})",
+                                elapsed_times[ind].0, elapsed_times[ind].1, took_time
+                            );
                         }
-                        println!("----- Estimated time budget: {:?}", Duration::from_secs_f64(*delays.first().unwrap() as f64 * real_sample_duration));
+                        println!(
+                            "----- Estimated time budget: {:?}",
+                            Duration::from_secs_f64(
+                                *delays.first().unwrap() as f64 * real_sample_duration
+                            )
+                        );
                         last_samples_pushed = 0;
                         pcm.prepare().unwrap();
                     } else {
