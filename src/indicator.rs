@@ -142,6 +142,72 @@ where
     }
 }
 
+pub struct OrdinaryLeastSquares<E> {
+    queue: VecDeque<(E, E)>,
+    s_x: E,
+    s_y: E,
+    s_xx: E,
+    s_yy: E,
+    s_xy: E,
+    len: E,
+    size: usize,
+}
+
+impl<E> Indicator<(E, E)> for OrdinaryLeastSquares<E> 
+where
+    E: Identity + PartialOrd
+        + Div<Output = E>
+        + Add<Output = E>
+        + Sub<Output = E>
+        + Mul<Output = E>
+        + Copy
+{
+    fn new(size: usize) -> Result<Self, &'static str> {
+        if size < 1 {
+            return Err("Size cannot be smaller than 1!");
+        }
+        Ok(OrdinaryLeastSquares {
+            len: E::zero(),
+            queue: VecDeque::with_capacity(size),
+            size,
+            s_x: E::zero(),
+            s_y: E::zero(),
+            s_xx: E::zero(),
+            s_yy: E::zero(),
+            s_xy: E::zero()
+        })
+    }
+    fn next(&mut self, el: (E, E)) -> (E, E) {
+        let (x, y) = el;
+        if self.queue.len() < self.size {
+            self.len = self.len + E::one();
+            self.s_x = self.s_x + x;
+            self.s_y = self.s_y + y;
+            self.s_xx = self.s_xx + x*x;
+            self.s_yy = self.s_yy + y*y;
+            self.s_xy = self.s_xy + x*y;
+        } else {
+            let (old_x, old_y) = self.queue.pop_back().unwrap();
+            self.s_x = self.s_x + x - old_x;
+            self.s_y = self.s_y + y - old_y;
+            self.s_xx = self.s_xx + (x - old_x)*(x + old_x);
+            self.s_yy = self.s_yy + (y - old_y)*(y + old_y);
+            self.s_xy = self.s_xy + x*y - old_x*old_y;
+        }
+        self.queue.push_front(el);
+        return self.value().unwrap();
+    }
+    fn value(&self) -> Option<(E, E)> {
+        if self.len > E::zero() {
+            let b = (self.len*self.s_xy - self.s_x*self.s_y)/(self.len*self.s_xx - self.s_x*self.s_x);
+            let a = (self.s_y - b*self.s_x)/self.len;
+            Some((a, b))
+        } else {
+            None
+        }
+    }
+}
+
 /*MIT*/
 // Based on https://github.com/craffel/median-filter/blob/master/Mediator.h by Colin Raffel
 // Original under MIT license. For posterity following code between /*MIT*/ markers can be

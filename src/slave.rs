@@ -2,7 +2,7 @@ use alsa::pcm::{Access, Format, HwParams, State, TstampType, PCM};
 use alsa::{Direction, ValueOr};
 use hound;
 
-use crate::indicator::{Indicator, SimpleMovingAverage, WelfordsMovingVariance, SlidingMedianFilter};
+use crate::indicator::{Indicator, SimpleMovingAverage, WelfordsMovingVariance, SlidingMedianFilter, OrdinaryLeastSquares};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -113,9 +113,9 @@ pub fn main(args: &ArgMatches) {
     let sam_num = period_size as usize * num_channels;
     let sam_num_over = sam_num + (2 * sinc_overlap + 1) * num_channels;
 
-    let mut desync = SimpleMovingAverage::new(desync_avg_size).unwrap();
+    let mut desync = OrdinaryLeastSquares::new(desync_avg_size).unwrap();
     let mut act_desync_avg = SimpleMovingAverage::new(desync_avg_size * 10).unwrap();
-    let mut correction = 0;
+    let mut correction = 0.;
 
     let sample_duration = 1. / (fs as f64);
     let mut real_sample_duration = sample_duration;
@@ -271,20 +271,28 @@ pub fn main(args: &ArgMatches) {
             let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32 + 1);
             let act_desync = next_sample - next_read as f64;
             let avg_act_desync = act_desync_avg.next(act_desync);
-            let cur_desync = desync.next(correction as f64 + avg_act_desync + act_desync);
-            let jump = (cur_desync - correction as f64).floor() as i64;
+            let cur_time = stamps.iter().fold(0., |acc, stamp| {
+                acc + duration_diff_secs_f64(*stamp, startstamp)
+            }) / stamps.len() as f64;
+            let (desync_a, desync_b) = desync.next((next_sample_time.duration_since(startstamp).unwrap().as_secs_f64(), correction as f64 + act_desync));
+            let cur_desync = desync_a + desync_b*next_sample_time.duration_since(startstamp).unwrap().as_secs_f64();
+            let jump = (cur_desync - correction).floor() as i64;
+            let max_jump = 100;
+            let jump = if jump.abs() > max_jump { jump.signum()*max_jump } else { jump };
             let jumpto = if jump > 0 {
                 next_read.saturating_add(jump as u32)
             } else {
                 next_read.saturating_sub((-jump) as u32)
             }
             .saturating_sub(sinc_overlap as u32);
+            let jumpto = if jumpto > reader.len()/num_channels as u32 {
+                reader.len()/num_channels as u32 } else { jumpto };
             //println!("[DBG] ===============================");
             //println!("[DBG] j = {}, jt = {}, c = {}, lsp = {}", jump, jumpto, correction, last_samples_pushed);
 
             if is_correction {
+                correction += jumpto as f64 - next_read.saturating_sub(sinc_overlap as u32) as f64;
                 reader.seek(jumpto).unwrap();
-                correction += jump;
             }
             elapsed_times.push(("Seeking", loop_start.elapsed()));
 
@@ -300,7 +308,7 @@ pub fn main(args: &ArgMatches) {
                 }
             }
 
-            let ratio = cur_desync - correction as f64;
+            let ratio = cur_desync - correction;
             if is_correction {
                 buf = if buf.len() > (2 * sinc_overlap + 1) * num_channels {
                     sinc_move_inter(&buf, ratio, sinc_overlap, num_channels)
@@ -327,8 +335,9 @@ pub fn main(args: &ArgMatches) {
         };
 
         print!(
-            "[INF] Desync: {:+.2}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:+.0}±{:.0} us, Spins: {}[K\r",
+            "[INF] Desync: {:+.2}, Correction: {:+.0}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:+.0}±{:.0} us, Spins: {}[K\r",
             cur_desync,
+            correction,
             avg_act_desync,
             delays.last().unwrap(),
             100. * (sample_duration / real_sample_duration - 1.),
