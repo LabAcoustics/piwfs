@@ -25,120 +25,121 @@ where
     Self: Sized,
 {
     fn new(size: usize) -> Result<Self, &'static str>;
-    fn next(&mut self, el: E) -> E;
+    fn next(&mut self, el: E);
     fn value(&self) -> Option<E>;
 }
 
-pub struct SimpleMovingAverage<E> {
+pub struct MovingSum<E> {
     queue: VecDeque<E>,
-    len: E,
     sum: Option<E>,
-    size: usize,
+    size: usize
 }
 
-impl<E> Indicator<E> for SimpleMovingAverage<E>
-where
-    E: Identity + Div<Output = E> + Add<Output = E> + Sub<Output = E> + Copy,
-{
+impl<E> Indicator<E> for MovingSum<E> where E: Add<Output = E> + Sub<Output = E> + Copy {
     fn new(size: usize) -> Result<Self, &'static str> {
-        if size < 1 {
-            return Err("Size cannot be smaller than 1!");
+        return if size < 1 {
+            Err("Size cannot be smaller than 1!")
+        } else {
+            Ok(MovingSum {
+                queue: VecDeque::with_capacity(size),
+                sum: None,
+                size
+            })
         }
-        return Ok(SimpleMovingAverage {
-            queue: VecDeque::with_capacity(size),
-            len: E::zero(),
-            sum: None,
-            size,
-        });
     }
-    fn next(&mut self, el: E) -> E {
-        let mut sum = if let Some(old_sum) = self.sum {
-            old_sum + el
+    fn next(&mut self, el: E) {
+        self.sum = Some(if let Some(sum) = self.sum {
+            sum + if self.queue.len() < self.size {
+                el
+            } else {
+                el - self.queue.pop_back().unwrap()
+            }
         } else {
             el
-        };
-        if self.queue.len() == self.size {
-            sum = sum - self.queue.pop_back().unwrap()
-        } else if self.queue.len() < self.size {
-            self.len = self.len + E::one();
-        } else {
-            unreachable!()
-        }
+        });
         self.queue.push_front(el);
-        self.sum = Some(sum);
-        return sum / self.len;
     }
     fn value(&self) -> Option<E> {
-        return if let Some(sum) = self.sum {
-            Some(sum / self.len)
-        } else {
-            None
-        };
+        return self.sum;
     }
 }
 
-pub struct WelfordsMovingVariance<E> {
-    sma: SimpleMovingAverage<E>,
+pub struct SimpleMovingAverage<E, D>
+{
+    sum: MovingSum<E>,
+    len: D,
+}
+
+impl<E, D> Indicator<E> for SimpleMovingAverage<E, D>
+where
+    E: Div<D, Output = E> + Copy + Add<Output = E> + Sub<Output = E>,
+    D: Identity + Add<Output = D> + Copy
+{
+    fn new(size: usize) -> Result<Self, &'static str> {
+        let sum = MovingSum::new(size)?;
+        return Ok(SimpleMovingAverage {
+            sum,
+            len: D::zero()
+        });
+    }
+    fn next(&mut self, el: E) {
+        self.sum.next(el);
+        self.len = self.len + D::one();
+    }
+    fn value(&self) -> Option<E> {
+        let sum = self.sum.value()?;
+        return Some(sum / self.len);
+    }
+}
+
+pub struct WelfordsMovingVariance<E, D> 
+{
+    sma: SimpleMovingAverage<E, D>,
     var_sum: Option<E>,
 }
 
-impl<E> WelfordsMovingVariance<E>
+impl<E, D> WelfordsMovingVariance<E, D>
 where
-    E: Identity + Div<Output = E> + Add<Output = E> + Sub<Output = E> + Copy,
+    E: Div<D, Output = E> + Copy + Add<Output = E> + Sub<Output = E>,
+    D: Identity + Add<Output = D> + Copy
 {
     pub fn average(&self) -> Option<E> {
         return self.sma.value();
     }
 }
 
-impl<E> Indicator<E> for WelfordsMovingVariance<E>
+impl<E, D> Indicator<E> for WelfordsMovingVariance<E, D>
 where
-    E: Identity
-        + Div<Output = E>
-        + Add<Output = E>
-        + Sub<Output = E>
-        + Mul<Output = E>
-        + Copy
-        + PartialOrd,
+    E: Div<D, Output = E> + Copy + Add<Output = E> + Sub<Output = E> + Mul<Output = E>,
+    D: Identity + Add<Output = D> + Sub<Output = D> + Copy
 {
     fn new(size: usize) -> Result<Self, &'static str> {
         let sma = SimpleMovingAverage::new(size)?;
         return Ok(WelfordsMovingVariance { sma, var_sum: None });
     }
-    fn next(&mut self, el: E) -> E {
-        let mut sum = if let Some(old_sum) = self.var_sum {
-            let last_el = *self.sma.queue.back().unwrap();
-            let old_avg = self.sma.value().unwrap();
-            let len = self.sma.queue.len();
-            let avg = self.sma.next(el);
-            old_sum
-                + if len == self.sma.size {
+    fn next(&mut self, el: E){
+        self.var_sum = if let Some(old_avg) = self.sma.value() {
+            let last_el = *self.sma.sum.queue.back().unwrap();
+            self.sma.next(el);
+            let avg = self.sma.value().unwrap();
+            let sum = if self.sma.sum.queue.len() == self.sma.sum.size {
                     (el - avg + last_el - old_avg) * (el - last_el)
                 } else {
                     (el - avg) * (el - old_avg)
-                }
+                };
+            Some(if let Some(old_sum) = self.var_sum {
+                sum + old_sum
+            } else {
+                sum
+            })
         } else {
             self.sma.next(el);
-            E::zero()
-        };
-        sum = if sum < E::zero() { E::zero() } else { sum };
-        self.var_sum = Some(sum);
-        return if self.sma.len > E::one() {
-            sum / (self.sma.len - E::one())
-        } else {
-            E::zero()
+            None
         };
     }
     fn value(&self) -> Option<E> {
-        return if let Some(sum) = self.var_sum {
-            if self.sma.len > E::one() {
-                Some(sum / (self.sma.len - E::one()))
-            } else {
-                Some(E::zero())
-            }
-        } else {
-            None
-        };
+        let sum = self.var_sum?;
+        return Some(sum / (self.sma.len - D::one()));
     }
 }
 
@@ -177,7 +178,7 @@ where
             s_xy: E::zero()
         })
     }
-    fn next(&mut self, el: (E, E)) -> (E, E) {
+    fn next(&mut self, el: (E, E)){
         let (x, y) = el;
         if self.queue.len() < self.size {
             self.len = self.len + E::one();
@@ -195,7 +196,6 @@ where
             self.s_xy = self.s_xy + x*y - old_x*old_y;
         }
         self.queue.push_front(el);
-        return self.value().unwrap();
     }
     fn value(&self) -> Option<(E, E)> {
         if self.len > E::zero() {
@@ -323,7 +323,7 @@ where
         }
         return Ok(out)
     }
-    fn next(&mut self, el: E) -> E {
+    fn next(&mut self, el: E) {
         let p = self.pos[self.idx];
         let mut old = None;
         if self.data.len() <= self.idx {
@@ -338,7 +338,7 @@ where
                 self.min_ct += 1;
             } else if el > old.unwrap() {
                 self.min_sort_down(p);
-                return self.value().unwrap();
+                return;
             }
             if self.min_sort_up(p) && self.cmp_exch(0, -1) {
                 self.max_sort_down(-1);
@@ -348,7 +348,7 @@ where
                 self.max_ct += 1;
             } else if el < old.unwrap() {
                 self.max_sort_down(p);
-                return self.value().unwrap();
+                return;
             }
             if self.max_sort_up(p) && self.min_ct != 0 && self.cmp_exch(1, 0) {
                 self.min_sort_down(1);
@@ -361,7 +361,6 @@ where
                 self.min_sort_down(1);
             }
         }
-        return self.value().unwrap()
     }
     fn value(&self) -> Option<E> {
         return if self.data.len() == 0 {

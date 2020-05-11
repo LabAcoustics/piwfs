@@ -114,7 +114,7 @@ pub fn main(args: &ArgMatches) {
     let sam_num_over = sam_num + (2 * sinc_overlap + 1) * num_channels;
 
     let mut desync = OrdinaryLeastSquares::new(desync_avg_size).unwrap();
-    let mut act_desync_avg = SimpleMovingAverage::new(desync_avg_size * 10).unwrap();
+    let mut act_desync_avg = SimpleMovingAverage::<_, f64>::new(desync_avg_size * 10).unwrap();
     let mut correction = 0.;
 
     let sample_duration = 1. / (fs as f64);
@@ -127,7 +127,7 @@ pub fn main(args: &ArgMatches) {
 
     let mut samples_pushed = 0;
     let mut nsts = VecDeque::new();
-    let mut est_error_var = WelfordsMovingVariance::new(1000).unwrap();
+    let mut est_error_var = WelfordsMovingVariance::<_, f64>::new(1000).unwrap();
 
     let sigint = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&sigint))
@@ -178,7 +178,10 @@ pub fn main(args: &ArgMatches) {
                     if cur_ns == *ns {
                         let err = duration_diff_secs_f64(*nst, *stamp) * 1_000_000.;
                         //println!("[DBG] Est error: {} (est = {}, act = {})", *nst - *stamp, nst, stamp);
-                        est_error = [est_error_var.next(err), est_error_var.average().unwrap()];
+                        est_error_var.next(err);
+                        if let Some(var) = est_error_var.value() {
+                            est_error = [var, est_error_var.average().unwrap()];
+                        }
                         nsts.remove(0);
                     } else if cur_ns > *ns {
                         nsts.remove(0);
@@ -194,7 +197,7 @@ pub fn main(args: &ArgMatches) {
         //    delays = vec![*delays.last().unwrap()];
         //}
 
-        real_sample_duration = real_sample_duration_avg.next(
+        real_sample_duration_avg.next(
             if !args.is_present("no-estimation")
                 && pcm.state() == State::Running
                 && last_samples_pushed > 0
@@ -231,6 +234,7 @@ pub fn main(args: &ArgMatches) {
                 real_sample_duration
             },
         );
+        real_sample_duration = real_sample_duration_avg.value().unwrap();
         elapsed_times.push(("Sample duration estimation", loop_start.elapsed()));
 
         let mut buf: Vec<i16> = Vec::with_capacity(sam_num_over);
@@ -270,12 +274,11 @@ pub fn main(args: &ArgMatches) {
                 / sample_duration;
             let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32 + 1);
             let act_desync = next_sample - next_read as f64;
-            let avg_act_desync = act_desync_avg.next(act_desync);
-            let cur_time = stamps.iter().fold(0., |acc, stamp| {
-                acc + duration_diff_secs_f64(*stamp, startstamp)
-            }) / stamps.len() as f64;
-            let (desync_a, desync_b) = desync.next((next_sample_time.duration_since(startstamp).unwrap().as_secs_f64(), correction as f64 + act_desync));
-            let cur_desync = desync_a + desync_b*next_sample_time.duration_since(startstamp).unwrap().as_secs_f64();
+            act_desync_avg.next(act_desync);
+            let next_sample_time_f64 = next_sample_time.duration_since(startstamp).unwrap().as_secs_f64();
+            desync.next((next_sample_time_f64, correction as f64 + act_desync));
+            let (desync_a, desync_b) = desync.value().unwrap();
+            let cur_desync = desync_a + desync_b*next_sample_time_f64;
             let jump = (cur_desync - correction).floor() as i64;
             let max_jump = 100;
             let jump = if jump.abs() > max_jump { jump.signum()*max_jump } else { jump };
@@ -322,7 +325,7 @@ pub fn main(args: &ArgMatches) {
                 break;
             }
 
-            (cur_desync, avg_act_desync)
+            (cur_desync, act_desync_avg.value().unwrap())
         } else {
             (
                 -startstamp
