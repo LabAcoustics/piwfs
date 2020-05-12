@@ -2,19 +2,19 @@ use alsa::pcm::{Access, Format, HwParams, State, TstampType, PCM};
 use alsa::{Direction, ValueOr};
 use hound;
 
-use crate::indicator::{Indicator, SimpleMovingAverage, WelfordsMovingVariance, SlidingMedianFilter, OrdinaryLeastSquares};
+use crate::indicator::{Average, Indicator, LinearRegression, Median, Variance};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use std::collections::VecDeque;
 use std::convert::TryInto;
-use std::f64::consts::PI;
+use std::f32::consts::PI;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::ArgMatches;
 
-fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize) -> Vec<i16> {
+fn sinc_move_inter(buf: &Vec<i16>, ratio: f32, size: usize, num_channels: usize) -> Vec<i16> {
     let out_size = buf.len() - (2 * size + 1) * num_channels;
     let mut out = vec![0; out_size];
     for channel in 0..num_channels {
@@ -24,12 +24,12 @@ fn sinc_move_inter(buf: &Vec<i16>, ratio: f64, size: usize, num_channels: usize)
                 ((channel + out_it)..(out_it + (2 * size + 1) * num_channels)).step_by(num_channels)
             {
                 let cur_r = PI
-                    * (ratio + (out_it / num_channels + size) as f64
-                        - (in_it / num_channels) as f64);
-                interp += (buf[in_it] as f64) * cur_r.sin() / cur_r;
+                    * (ratio + (out_it / num_channels + size) as f32
+                        - (in_it / num_channels) as f32);
+                interp += (buf[in_it] as f32) * cur_r.sin() / cur_r;
             }
             assert_eq!(out[out_it], 0);
-            out[out_it] = (std::i16::MIN as f64).max((std::i16::MAX as f64).min(interp)) as i16;
+            out[out_it] = (std::i16::MIN as f32).max((std::i16::MAX as f32).min(interp)) as i16;
         }
     }
     return out;
@@ -113,13 +113,13 @@ pub fn main(args: &ArgMatches) {
     let sam_num = period_size as usize * num_channels;
     let sam_num_over = sam_num + (2 * sinc_overlap + 1) * num_channels;
 
-    let mut desync = OrdinaryLeastSquares::new(desync_avg_size).unwrap();
-    let mut act_desync_avg = SimpleMovingAverage::<_, f64>::new(desync_avg_size * 10).unwrap();
+    let mut desync = LinearRegression::new(desync_avg_size).unwrap();
+    let mut act_desync_avg = Average::new(desync_avg_size * 10).unwrap();
     let mut correction = 0.;
 
     let sample_duration = 1. / (fs as f64);
     let mut real_sample_duration = sample_duration;
-    let mut real_sample_duration_avg = SlidingMedianFilter::new(est_avg_size).unwrap();
+    let mut real_sample_duration_avg = Median::new(est_avg_size).unwrap();
 
     let mut last_samples_pushed = 0;
     let mut last_delays = Vec::new();
@@ -127,7 +127,7 @@ pub fn main(args: &ArgMatches) {
 
     let mut samples_pushed = 0;
     let mut nsts = VecDeque::new();
-    let mut est_error_var = WelfordsMovingVariance::<_, f64>::new(1000).unwrap();
+    let mut est_error_var = Variance::new(1000).unwrap();
 
     let sigint = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&sigint))
@@ -275,21 +275,31 @@ pub fn main(args: &ArgMatches) {
             let next_read = next_rdr_sample(&mut reader).saturating_sub(sinc_overlap as u32 + 1);
             let act_desync = next_sample - next_read as f64;
             act_desync_avg.next(act_desync);
-            let next_sample_time_f64 = next_sample_time.duration_since(startstamp).unwrap().as_secs_f64();
+            let next_sample_time_f64 = next_sample_time
+                .duration_since(startstamp)
+                .unwrap()
+                .as_secs_f64();
             desync.next((next_sample_time_f64, correction as f64 + act_desync));
-            let (desync_a, desync_b) = desync.value().unwrap();
-            let cur_desync = desync_a + desync_b*next_sample_time_f64;
+            let (desync_a, desync_b) = desync.value().unwrap_or((0., 0.));
+            let cur_desync = desync_a + desync_b * next_sample_time_f64;
             let jump = (cur_desync - correction).floor() as i64;
             let max_jump = 100;
-            let jump = if jump.abs() > max_jump { jump.signum()*max_jump } else { jump };
+            let jump = if jump.abs() > max_jump {
+                jump.signum() * max_jump
+            } else {
+                jump
+            };
             let jumpto = if jump > 0 {
                 next_read.saturating_add(jump as u32)
             } else {
                 next_read.saturating_sub((-jump) as u32)
             }
             .saturating_sub(sinc_overlap as u32);
-            let jumpto = if jumpto > reader.len()/num_channels as u32 {
-                reader.len()/num_channels as u32 } else { jumpto };
+            let jumpto = if jumpto > reader.len() / num_channels as u32 {
+                reader.len() / num_channels as u32
+            } else {
+                jumpto
+            };
             //println!("[DBG] ===============================");
             //println!("[DBG] j = {}, jt = {}, c = {}, lsp = {}", jump, jumpto, correction, last_samples_pushed);
 
@@ -314,7 +324,7 @@ pub fn main(args: &ArgMatches) {
             let ratio = cur_desync - correction;
             if is_correction {
                 buf = if buf.len() > (2 * sinc_overlap + 1) * num_channels {
-                    sinc_move_inter(&buf, ratio, sinc_overlap, num_channels)
+                    sinc_move_inter(&buf, ratio as f32, sinc_overlap, num_channels)
                 } else {
                     buf[sinc_overlap..].into()
                 }
