@@ -247,10 +247,10 @@ where
     fn value(&self) -> Option<(E, E)> {
         let var = self.var.sum?;
         let cov = self.cov.sum?;
-        let s_x = self.cov.x_avg.sum.value()?;
-        let s_y = self.cov.y_avg.sum.value()?;
+        let m_x = self.cov.x_avg.value()?;
+        let m_y = self.cov.y_avg.value()?;
         let b = cov/var;
-        let a = (s_y - b * s_x) / self.var.avg.len;
+        let a = m_y - b * m_x;
         Some((a, b))
     }
 }
@@ -463,7 +463,6 @@ mod tests {
             tq.iter().sum()
         });
     }
-
     #[test]
     fn test_average() {
         test_indicator!(Average, |tq: &VecDeque<TYPE>| {
@@ -517,6 +516,38 @@ mod tests {
     }
     #[test]
     fn test_linear_regression() {
+        let mut rng = rand::thread_rng();
+        let mut test_queue = VecDeque::<(TYPE, TYPE)>::with_capacity(SIZE);
+        let mut test_indicator = LinearRegression::new(SIZE).unwrap();
+
+        let mut max_err = (TYPE::zero(), TYPE::zero());
+
+        for iter in 0..ITERS {
+            for el in 0..SIZE {
+                let x = rng.gen();
+                let y = rng.gen();
+                test_queue.push_front((x, y));
+                if iter > 0 {
+                    test_queue.pop_back();
+                }
+                test_indicator.next((x, y));
+                let len = test_queue.len() as TYPE;
+                let (sxy, sx, sy, sxx) = test_queue.iter().fold((0., 0., 0., 0.), |acc, (x1, y1)| {
+                    (acc.0 + x1*y1, acc.1 + x1, acc.2 + y1, acc.3 + x1*x1)
+                });
+                let l_b = (sxy - (sx*sy)/len)/(sxx - (sx*sx)/len);
+                let l_a = sy/len - l_b*sx/len;
+                if let Some((r_a, r_b)) = test_indicator.value() {
+                    let err_a = (l_a - r_a).abs();
+                    let err_b = (l_b - r_b).abs();
+                    max_err.0 = if err_a > max_err.0 { err_a } else  { max_err.0 };
+                    max_err.1 = if err_b > max_err.1 { err_b } else  { max_err.1 };
+                    assert!(err_b < EPS, "B: {} is not equal to {} within tolerance ({}), after {} operations.", l_b, r_b, EPS, iter*SIZE + el);
+                    assert!(err_a < EPS, "A: {} is not equal to {} within tolerance ({}), after {} operations.", l_a, r_a, EPS, iter*SIZE + el);
+                }
+            }
+        }
+        println!("Max Error: {:?}", max_err);
     }
     #[test]
     fn test_median() {
