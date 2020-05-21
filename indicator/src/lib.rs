@@ -195,10 +195,11 @@ where
         self.sum = if let Some(old_x_avg) = self.x_avg.value() {
             let last_x = *self.x_avg.sum.queue.back().unwrap();
             let last_y = *self.y_avg.sum.queue.back().unwrap();
+            let old_len = self.x_avg.sum.queue.len();
             self.x_avg.next(x);
             self.y_avg.next(y);
             let y_avg = self.y_avg.value().unwrap();
-            let sum = if self.x_avg.sum.queue.len() == self.x_avg.sum.size {
+            let sum = if old_len == self.x_avg.sum.size {
                 (x - old_x_avg) * (y - y_avg) - (last_x - old_x_avg) * (last_y - y_avg)
             } else {
                 (x - old_x_avg) * (y - y_avg)
@@ -482,6 +483,37 @@ mod tests {
     }
     #[test]
     fn test_covariance() {
+        let mut rng = rand::thread_rng();
+        let mut test_queue = VecDeque::<(TYPE, TYPE)>::with_capacity(SIZE);
+        let mut test_indicator = Covariance::new(SIZE).unwrap();
+
+        let mut max_err = TYPE::zero();
+
+        for iter in 0..ITERS {
+            for el in 0..SIZE {
+                let val1 = rng.gen();
+                let val2 = rng.gen();
+                test_queue.push_front((val1, val2));
+                if iter > 0 {
+                    test_queue.pop_back();
+                }
+                test_indicator.next((val1, val2));
+                let len = test_queue.len() as TYPE;
+                let (sum1, sum2) = test_queue.iter().fold((0., 0.), |acc, (el1, el2)| {
+                    (acc.0 + el1, acc.1 + el2)
+                });
+                let (mean1, mean2) = (sum1/len, sum2/len);
+                let lval: TYPE = test_queue.iter().fold(0., |acc, (el1, el2)| {
+                    acc + (el1 - mean1)*(el2 - mean2)
+                })/(len - 1.);
+                if let Some(rval) = test_indicator.value() {
+                    let err = (lval - rval).abs();
+                    max_err = if err > max_err { err } else { max_err };
+                    assert!(err < EPS, "{} is not equal to {} within tolerance ({}), after {} operations.", lval, rval, EPS, iter*SIZE + el);
+                }
+            }
+        }
+        println!("Max Error: {}", max_err);
     }
     #[test]
     fn test_linear_regression() {
