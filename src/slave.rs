@@ -2,7 +2,7 @@ use alsa::pcm::{Access, Format, HwParams, State, TstampType, PCM};
 use alsa::{Direction, ValueOr};
 use hound;
 
-use crate::indicator::{Average, Indicator, LinearRegression, Median, Variance};
+use indicator::{Average, Indicator, LinearRegression, Median, Variance};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

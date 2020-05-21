@@ -1,6 +1,5 @@
 use clap::{App, Arg, SubCommand};
 
-mod indicator;
 mod master;
 mod slave;
 

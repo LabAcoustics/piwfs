@@ -10,3 +10,4 @@ hound = "3"
 signal-hook = "0"
 alsa = "0"
 nix = "0.15"
+indicator = {path = "./indicator"}
