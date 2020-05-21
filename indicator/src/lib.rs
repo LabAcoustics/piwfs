@@ -101,8 +101,10 @@ where
         });
     }
     fn next(&mut self, el: E) {
+        if self.sum.queue.len() < self.sum.size {
+            self.len = self.len + E::Divider::one();
+        }
         self.sum.next(el);
-        self.len = self.len + E::Divider::one();
     }
     fn value(&self) -> Option<E> {
         let sum = self.sum.value()?;
@@ -417,8 +419,64 @@ where
 
 #[cfg(test)]
 mod tests {
+    use rand::prelude::*;
+    use super::*;
+    use std::collections::VecDeque;
+    const SIZE: usize = 10000;
+    const ITERS: usize = 10;
+    type TYPE = f64;
+    const EPS: TYPE = 1e-9;
+
+    macro_rules! test_indicator {
+        ($ind:ident, $lval:expr) => {
+            let mut rng = rand::thread_rng();
+            let mut test_queue = VecDeque::<TYPE>::with_capacity(SIZE);
+            let mut test_indicator = $ind::new(SIZE).unwrap();
+
+            let mut max_err = TYPE::zero();
+
+            for iter in 0..ITERS {
+                for el in 0..SIZE {
+                let val = rng.gen();
+                test_queue.push_front(val);
+                if iter > 0 {
+                    test_queue.pop_back();
+                }
+                test_indicator.next(val);
+                let lval: TYPE = $lval(&test_queue);
+                let rval: TYPE = test_indicator.value().unwrap();
+                let err = (lval - rval).abs();
+                max_err = if err > max_err { err } else { max_err };
+                assert!(err < EPS, "{} is not equal to {} within tolerance ({}), after {} operations.", lval, rval, EPS, iter*SIZE + el);
+                }
+            }
+            println!("Max Error: {}", max_err);
+        }
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_sum() {
+        test_indicator!(Sum, |tq: &VecDeque<TYPE>| {
+            tq.iter().sum()
+        });
+    }
+
+    #[test]
+    fn test_average() {
+        test_indicator!(Average, |tq: &VecDeque<TYPE>| {
+            tq.iter().sum::<TYPE>()/(tq.len() as TYPE)
+        });
+    }
+    #[test]
+    fn test_variance() {
+    }
+    #[test]
+    fn test_covariance() {
+    }
+    #[test]
+    fn test_linear_regression() {
+    }
+    #[test]
+    fn test_median() {
     }
 }
