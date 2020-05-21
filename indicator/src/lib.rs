@@ -143,9 +143,10 @@ where
     fn next(&mut self, el: E) {
         self.sum = if let Some(old_avg) = self.avg.value() {
             let last_el = *self.avg.sum.queue.back().unwrap();
+            let old_len = self.avg.sum.queue.len();
             self.avg.next(el);
             let avg = self.avg.value().unwrap();
-            let sum = if self.avg.sum.queue.len() == self.avg.sum.size {
+            let sum = if old_len == self.avg.sum.size {
                 (el - avg + last_el - old_avg) * (el - last_el)
             } else {
                 (el - avg) * (el - old_avg)
@@ -437,17 +438,18 @@ mod tests {
 
             for iter in 0..ITERS {
                 for el in 0..SIZE {
-                let val = rng.gen();
-                test_queue.push_front(val);
-                if iter > 0 {
-                    test_queue.pop_back();
-                }
-                test_indicator.next(val);
-                let lval: TYPE = $lval(&test_queue);
-                let rval: TYPE = test_indicator.value().unwrap();
-                let err = (lval - rval).abs();
-                max_err = if err > max_err { err } else { max_err };
-                assert!(err < EPS, "{} is not equal to {} within tolerance ({}), after {} operations.", lval, rval, EPS, iter*SIZE + el);
+                    let val = rng.gen();
+                    test_queue.push_front(val);
+                    if iter > 0 {
+                        test_queue.pop_back();
+                    }
+                    test_indicator.next(val);
+                    let lval: TYPE = $lval(&test_queue);
+                    if let Some(rval) = test_indicator.value() {
+                        let err = (lval - rval).abs();
+                        max_err = if err > max_err { err } else { max_err };
+                        assert!(err < EPS, "{} is not equal to {} within tolerance ({}), after {} operations.", lval, rval, EPS, iter*SIZE + el);
+                    }
                 }
             }
             println!("Max Error: {}", max_err);
@@ -469,6 +471,14 @@ mod tests {
     }
     #[test]
     fn test_variance() {
+        test_indicator!(Variance, |tq: &VecDeque<TYPE>| {
+            let len = tq.len() as TYPE;
+            let mean = tq.iter().sum::<TYPE>()/len;
+            tq.iter().fold(0., |acc, el| {
+                acc + (el - mean).powi(2)
+            })/(len - 1.)
+
+        });
     }
     #[test]
     fn test_covariance() {
