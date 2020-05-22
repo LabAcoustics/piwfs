@@ -129,4 +129,15 @@ fn test_linear_regression() {
 }
 #[test]
 fn test_median() {
+    const SIZE: usize = 1000;
+    test_indicator!(Median, |tq: &VecDeque<TYPE>| {
+        let len = tq.len();
+        let mut tqvec: Vec<TYPE> = tq.iter().map(|el| *el).collect();
+        tqvec.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        if len % 2 == 0 {
+            (tqvec[len/2] + tqvec[len/2 - 1])/(TYPE::one() + TYPE::one())
+        } else {
+            tqvec[len/2]
+        }
+    });
 }
