@@ -114,7 +114,7 @@ pub fn main(args: &ArgMatches) {
     let sam_num_over = sam_num + (2 * sinc_overlap + 1) * num_channels;
 
     let mut desync = LinearRegression::new(desync_avg_size).unwrap();
-    let mut act_desync_avg = Average::new(desync_avg_size * 10).unwrap();
+    let mut act_desync_avg = Average::new(10000).unwrap();
     let mut correction = 0.;
 
     let sample_duration = 1. / (fs as f64);
@@ -305,6 +305,7 @@ pub fn main(args: &ArgMatches) {
 
             if is_correction {
                 correction += jumpto as f64 - next_read.saturating_sub(sinc_overlap as u32) as f64;
+                assert_eq!(correction, cur_desync.floor());
                 reader.seek(jumpto).unwrap();
             }
             elapsed_times.push(("Seeking", loop_start.elapsed()));
@@ -348,9 +349,8 @@ pub fn main(args: &ArgMatches) {
         };
 
         print!(
-            "[INF] Desync: {:+.2}, Correction: {:+.0}, Diff: {:+.2}, Delay: {}, Freq: {:+.3}%, Error: {:+.0}±{:.0} us, Spins: {}[K\r",
+            "[INF] Desync: {:+.1}, Diff: {:+.3}, Delay: {}, Freq: {:+.3}%, Error: {:+.0}±{:.0} us, Spins: {}[K\r",
             cur_desync,
-            correction,
             avg_act_desync,
             delays.last().unwrap(),
             100. * (sample_duration / real_sample_duration - 1.),
