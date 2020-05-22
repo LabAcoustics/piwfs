@@ -1,5 +1,45 @@
-use std::collections::VecDeque;
+#[cfg(test)]
+mod tests;
+
 use std::ops::{Add, Div, Mul, Sub};
+
+struct RotVec<T> {
+    data: Vec<T>,
+    position: usize,
+    size: usize
+}
+
+impl<T> RotVec<T> where T: Copy {
+    fn with_capacity(size: usize) -> Self {
+        return RotVec {
+            data: Vec::with_capacity(size),
+            position: 0,
+            size
+        }
+    }
+    fn popush(&mut self, el: T) -> Option<T> {
+        return if self.full() {
+            let old_el = self.data[self.position];
+            self.data[self.position] = el;
+            self.position = (self.position + 1) % self.size;
+            return Some(old_el)
+        } else {
+            self.data.push(el);
+            None
+        }
+
+    }
+    fn back(&self) -> Option<T> {
+        return if self.full() {
+            Some(self.data[self.position])
+        } else {
+            None
+        }
+    }
+    fn full(&self) -> bool {
+        return self.data.len() == self.size
+    }
+}
 
 pub trait Identity {
     fn zero() -> Self;
@@ -41,9 +81,8 @@ where
 }
 
 pub struct Sum<E> {
-    queue: VecDeque<E>,
+    queue: RotVec<E>,
     sum: Option<E>,
-    size: usize,
 }
 
 impl<E> Indicator<E> for Sum<E>
@@ -56,23 +95,23 @@ where
             Err("Size cannot be smaller than 1!")
         } else {
             Ok(Sum {
-                queue: VecDeque::with_capacity(size),
+                queue: RotVec::with_capacity(size),
                 sum: None,
-                size,
             })
         };
     }
     fn next(&mut self, el: E) {
+        let full = self.queue.full();
+        let old_el = self.queue.popush(el);
         self.sum = Some(if let Some(sum) = self.sum {
-            sum + if self.queue.len() < self.size {
-                el
+            sum + if full {
+                el - old_el.unwrap()
             } else {
-                el - self.queue.pop_back().unwrap()
+                el
             }
         } else {
             el
         });
-        self.queue.push_front(el);
     }
     fn value(&self) -> Option<E> {
         return self.sum;
@@ -101,7 +140,7 @@ where
         });
     }
     fn next(&mut self, el: E) {
-        if self.sum.queue.len() < self.sum.size {
+        if !self.sum.queue.full() {
             self.len = self.len + E::Divider::one();
         }
         self.sum.next(el);
@@ -142,12 +181,12 @@ where
     }
     fn next(&mut self, el: E) {
         self.sum = if let Some(old_avg) = self.avg.value() {
-            let last_el = *self.avg.sum.queue.back().unwrap();
-            let old_len = self.avg.sum.queue.len();
+            let last_el = self.avg.sum.queue.back();
+            let full = self.avg.sum.queue.full();
             self.avg.next(el);
             let avg = self.avg.value().unwrap();
-            let sum = if old_len == self.avg.sum.size {
-                (el - avg + last_el - old_avg) * (el - last_el)
+            let sum = if full {
+                (el - avg + last_el.unwrap() - old_avg) * (el - last_el.unwrap())
             } else {
                 (el - avg) * (el - old_avg)
             };
@@ -193,14 +232,14 @@ where
     }
     fn next(&mut self, (x, y): (E, E)) {
         self.sum = if let Some(old_x_avg) = self.x_avg.value() {
-            let last_x = *self.x_avg.sum.queue.back().unwrap();
-            let last_y = *self.y_avg.sum.queue.back().unwrap();
-            let old_len = self.x_avg.sum.queue.len();
+            let last_x = self.x_avg.sum.queue.back();
+            let last_y = self.y_avg.sum.queue.back();
+            let full = self.x_avg.sum.queue.full();
             self.x_avg.next(x);
             self.y_avg.next(y);
             let y_avg = self.y_avg.value().unwrap();
-            let sum = if old_len == self.x_avg.sum.size {
-                (x - old_x_avg) * (y - y_avg) - (last_x - old_x_avg) * (last_y - y_avg)
+            let sum = if full {
+                (x - old_x_avg) * (y - y_avg) - (last_x.unwrap() - old_x_avg) * (last_y.unwrap() - y_avg)
             } else {
                 (x - old_x_avg) * (y - y_avg)
             };
@@ -418,138 +457,3 @@ where
     }
 }
 /*MIT*/
-
-#[cfg(test)]
-mod tests {
-    use rand::prelude::*;
-    use super::*;
-    use std::collections::VecDeque;
-    const SIZE: usize = 10000;
-    const ITERS: usize = 10;
-    type TYPE = f64;
-    const EPS: TYPE = 1e-9;
-
-    macro_rules! test_indicator {
-        ($ind:ident, $lval:expr) => {
-            let mut rng = rand::thread_rng();
-            let mut test_queue = VecDeque::<TYPE>::with_capacity(SIZE);
-            let mut test_indicator = $ind::new(SIZE).unwrap();
-
-            let mut max_err = TYPE::zero();
-
-            for iter in 0..ITERS {
-                for el in 0..SIZE {
-                    let val = rng.gen();
-                    test_queue.push_front(val);
-                    if iter > 0 {
-                        test_queue.pop_back();
-                    }
-                    test_indicator.next(val);
-                    let lval: TYPE = $lval(&test_queue);
-                    if let Some(rval) = test_indicator.value() {
-                        let err = (lval - rval).abs();
-                        max_err = if err > max_err { err } else { max_err };
-                        assert!(err < EPS, "{} is not equal to {} within tolerance ({}), after {} operations.", lval, rval, EPS, iter*SIZE + el);
-                    }
-                }
-            }
-            println!("Max Error: {}", max_err);
-        }
-    }
-
-    #[test]
-    fn test_sum() {
-        test_indicator!(Sum, |tq: &VecDeque<TYPE>| {
-            tq.iter().sum()
-        });
-    }
-    #[test]
-    fn test_average() {
-        test_indicator!(Average, |tq: &VecDeque<TYPE>| {
-            tq.iter().sum::<TYPE>()/(tq.len() as TYPE)
-        });
-    }
-    #[test]
-    fn test_variance() {
-        test_indicator!(Variance, |tq: &VecDeque<TYPE>| {
-            let len = tq.len() as TYPE;
-            let mean = tq.iter().sum::<TYPE>()/len;
-            tq.iter().fold(0., |acc, el| {
-                acc + (el - mean).powi(2)
-            })/(len - 1.)
-
-        });
-    }
-    #[test]
-    fn test_covariance() {
-        let mut rng = rand::thread_rng();
-        let mut test_queue = VecDeque::<(TYPE, TYPE)>::with_capacity(SIZE);
-        let mut test_indicator = Covariance::new(SIZE).unwrap();
-
-        let mut max_err = TYPE::zero();
-
-        for iter in 0..ITERS {
-            for el in 0..SIZE {
-                let val1 = rng.gen();
-                let val2 = rng.gen();
-                test_queue.push_front((val1, val2));
-                if iter > 0 {
-                    test_queue.pop_back();
-                }
-                test_indicator.next((val1, val2));
-                let len = test_queue.len() as TYPE;
-                let (sum1, sum2) = test_queue.iter().fold((0., 0.), |acc, (el1, el2)| {
-                    (acc.0 + el1, acc.1 + el2)
-                });
-                let (mean1, mean2) = (sum1/len, sum2/len);
-                let lval: TYPE = test_queue.iter().fold(0., |acc, (el1, el2)| {
-                    acc + (el1 - mean1)*(el2 - mean2)
-                })/(len - 1.);
-                if let Some(rval) = test_indicator.value() {
-                    let err = (lval - rval).abs();
-                    max_err = if err > max_err { err } else { max_err };
-                    assert!(err < EPS, "{} is not equal to {} within tolerance ({}), after {} operations.", lval, rval, EPS, iter*SIZE + el);
-                }
-            }
-        }
-        println!("Max Error: {}", max_err);
-    }
-    #[test]
-    fn test_linear_regression() {
-        let mut rng = rand::thread_rng();
-        let mut test_queue = VecDeque::<(TYPE, TYPE)>::with_capacity(SIZE);
-        let mut test_indicator = LinearRegression::new(SIZE).unwrap();
-
-        let mut max_err = (TYPE::zero(), TYPE::zero());
-
-        for iter in 0..ITERS {
-            for el in 0..SIZE {
-                let x = rng.gen();
-                let y = rng.gen();
-                test_queue.push_front((x, y));
-                if iter > 0 {
-                    test_queue.pop_back();
-                }
-                test_indicator.next((x, y));
-                let len = test_queue.len() as TYPE;
-                let (sxy, sx, sy, sxx) = test_queue.iter().fold((0., 0., 0., 0.), |acc, (x1, y1)| {
-                    (acc.0 + x1*y1, acc.1 + x1, acc.2 + y1, acc.3 + x1*x1)
-                });
-                let l_b = (sxy - (sx*sy)/len)/(sxx - (sx*sx)/len);
-                let l_a = sy/len - l_b*sx/len;
-                if let Some((r_a, r_b)) = test_indicator.value() {
-                    let err_a = (l_a - r_a).abs();
-                    let err_b = (l_b - r_b).abs();
-                    max_err.0 = if err_a > max_err.0 { err_a } else  { max_err.0 };
-                    max_err.1 = if err_b > max_err.1 { err_b } else  { max_err.1 };
-                    assert!(err_b < EPS, "B: {} is not equal to {} within tolerance ({}), after {} operations.", l_b, r_b, EPS, iter*SIZE + el);
-                    assert!(err_a < EPS, "A: {} is not equal to {} within tolerance ({}), after {} operations.", l_a, r_a, EPS, iter*SIZE + el);
-                }
-            }
-        }
-        println!("Max Error: {:?}", max_err);
-    }
-    #[test]
-    fn test_median() {
-    }
-}
