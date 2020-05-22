@@ -305,7 +305,6 @@ pub fn main(args: &ArgMatches) {
 
             if is_correction {
                 correction += jumpto as f64 - next_read.saturating_sub(sinc_overlap as u32) as f64;
-                assert_eq!(correction, cur_desync.floor());
                 reader.seek(jumpto).unwrap();
             }
             elapsed_times.push(("Seeking", loop_start.elapsed()));
