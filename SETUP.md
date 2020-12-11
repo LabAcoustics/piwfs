@@ -34,7 +34,7 @@ worry, you can still run PiWFS but it will be a bit less precies.
    `delay_filter` to `moving_median`, we found these values to be more
    resistant to network jitter. You can also configure `time_stamping` to be
    either `software` or `hardware` depending on capabilities of your NIC, or
-   you can add '-S` or `-H` switch to `ptp4l` commandline later.
+   you can add `-S` or `-H` switch to `ptp4l` commandline later.
 3. Run `ptp4l` on all of your devices starting with the Grandmaster via `sudo
    ptp4l -i <network interface> -f <path to config file> -m`, you should use a
    terminal multiplexer such as GNU Screen or Tmux to avoid having to keep many
@@ -48,9 +48,10 @@ worry, you can still run PiWFS but it will be a bit less precies.
 
 # Playback setup
 
-To compile PiWFS you need Rust istalled (search RustUp if you dont know how to
-install it) then download this repo and execute `cargo build` this should
-donwload and compile all dependecies and the final executable.
+To compile PiWFS you need Rust istalled (see [rustup](https://rustup.rs/) if
+you dont know how to install it) then download this repo and execute `cargo
+build` this should donwload and compile all dependecies and the final
+executable.
 
 Every playback device needs to have the `piwfs` executable as well as a audio
 file in a WAV format (currently only 16-bit is supported, we do not recommend
@@ -63,7 +64,7 @@ processing power required).
    now. Now you have 10 seconds to start all af playback devices.
 
 2. Run `piwfs` on every playback device (see `piwfs --help` for usage), for
-   example `sudo piwfs slave --testfile <path to WAV file>` --startat <startig
+   example `sudo piwfs slave --testfile <path to WAV file> --startat <startig
    timestamp>`, you will see diagnostic information printed on your terminal
    which will tell you how good is the synchronization. We recommend running
    piwfs in a terminal multiplexer as well.
