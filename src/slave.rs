@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::f32::consts::PI;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::panic::panic_any;
 
 use clap::ArgMatches;
 
@@ -28,7 +29,6 @@ fn sinc_move_inter(buf: &Vec<i16>, ratio: f32, size: usize, num_channels: usize)
                         - (in_it / num_channels) as f32);
                 interp += (buf[in_it] as f32) * cur_r.sin() / cur_r;
             }
-            assert_eq!(out[out_it], 0);
             out[out_it] = (std::i16::MIN as f32).max((std::i16::MAX as f32).min(interp)) as i16;
         }
     }
@@ -122,15 +122,13 @@ pub fn main(args: &ArgMatches) {
     let mut real_sample_duration_avg = Median::new(est_avg_size).unwrap();
 
     let mut last_samples_pushed = 0;
-    let mut last_delays = Vec::new();
-    let mut last_stamps = Vec::new();
 
     let mut samples_pushed = 0;
     let mut nsts = VecDeque::new();
     let mut est_error_var = Variance::new(1000).unwrap();
 
     let sigint = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&sigint))
+    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&sigint))
         .expect("[ERR] Error setting SIGINT hook");
 
     while !sigint.load(Ordering::Relaxed) {
@@ -192,44 +190,24 @@ pub fn main(args: &ArgMatches) {
             }
         }
         elapsed_times.push(("Error estimation", loop_start.elapsed()));
-        //if !is_spinning {
-        //    stamps = vec![*stamps.last().unwrap()];
-        //    delays = vec![*delays.last().unwrap()];
-        //}
 
         real_sample_duration_avg.next(
             if !args.is_present("no-estimation")
                 && pcm.state() == State::Running
-                && last_samples_pushed > 0
+                && stamps.len() > 1
             {
                 stamps
-                    .iter()
-                    .zip(delays.iter())
-                    .fold(0., |acc, (stamp, delay)| {
-                        //println!("[DBG] s = {}, ls = {}, d = {}, ld = {}, lsp = {}, t = {}", stamp, last_stamp, delay, last_delay, last_samples_pushed, mtime);
-                        let mtime = last_stamps.iter().zip(last_delays.iter()).fold(
-                            0.,
-                            |acc2, (last_stamp, last_delay)| {
-                                acc2 + if *last_delay <= 0 {
-                                    println!("\n[WRN] Delay less or equal 0!");
-                                    real_sample_duration
-                                } else {
-                                    stamp
-                                        .duration_since(*last_stamp)
-                                        .expect("Last stamp is after new stamp!")
-                                        .as_secs_f64()
-                                        / (last_delay + last_samples_pushed - delay) as f64
-                                }
-                            },
-                        ) / last_stamps.len() as f64;
+                    .windows(2)
+                    .zip(delays.windows(2))
+                    .fold(0., |acc, (stampw, delayw)| {
+                        let mtime = stampw[1].duration_since(stampw[0]).unwrap().as_secs_f64()/(delayw[0] - delayw[1]) as f64;
                         acc + if mtime > 0. {
                             mtime
                         } else {
-                            println!("\n[WRN] Mean sample time less or equal to zero!");
+                            println!("[WRN] Non-continous status times or delays");
                             real_sample_duration
                         }
-                    })
-                    / stamps.len() as f64
+                    }) / (stamps.len() - 1) as f64
             } else {
                 real_sample_duration
             },
@@ -364,8 +342,6 @@ pub fn main(args: &ArgMatches) {
             Ok(num) => {
                 assert_eq!(num, buf.len() / num_channels);
                 last_samples_pushed = num.try_into().unwrap();
-                last_delays = delays;
-                last_stamps = stamps;
             }
             Err(err) => {
                 if let Some(errno) = err.errno() {
@@ -392,10 +368,10 @@ pub fn main(args: &ArgMatches) {
                         last_samples_pushed = 0;
                         pcm.prepare().unwrap();
                     } else {
-                        panic!(err);
+                        panic_any(err);
                     }
                 } else {
-                    panic!(err);
+                    panic_any(err);
                 }
             }
         }
